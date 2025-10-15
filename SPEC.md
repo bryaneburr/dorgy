@@ -354,6 +354,10 @@ The project will progress through the following phases. Update the status column
 - Extend CLI (`org`, `watch`, `search`, `mv`) to consume the classification pipeline, including prompt support and JSON/dry-run parity.
 - Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
 
+### Progress Summary
+- Classification engine provides a heuristic fallback by default with optional DSPy integration (`DORGY_ENABLE_DSPY=1`) and JSON-backed caching.
+- CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
+
 ### Goals
 - Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.
 - Respect configuration toggles for recursion, hidden files, symlink handling, maximum sizes, and locked/corrupted file policies.

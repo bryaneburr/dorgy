@@ -28,6 +28,12 @@
 - Upcoming focus: integrate classification pipeline (Phase 3) atop the ingestion outputs and enhance error handling/quarantine flows.
 - Implemented locked-file copy/wait policies, oversized sampling, quarantine moves, and ingestion logging to `dorgy.log`; added tests covering these behaviours.
 
+## 2025-10-17
+- Started Phase 3 on `feature/phase-3-classification`; added classification models, DSPy engine scaffolding, and smoke tests obeying Google-style docstrings.
+- Next actions: implement DSPy-backed classification, persist decisions into state, and extend CLI workflows to surface classification results.
+- Implemented heuristic classification fallback, CLI integration (including rename toggle support), state persistence of decisions, and coverage for new behaviours.
+- Added JSON-backed classification cache, confidence-based review routing, and optional DSPy activation via `DORGY_ENABLE_DSPY`.
+
 ## 2025-10-16 (cont.)
 - Replaced all Python module/class/function docstrings with Google-style format across src/ and tests/ to standardize documentation quality.
 - Updated `AGENTS.md` directives to mandate Google-style docstrings for future contributions.

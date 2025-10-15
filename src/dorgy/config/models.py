@@ -91,6 +91,7 @@ class OrganizationOptions(DorgyBaseModel):
         preserve_language: Whether to retain original language metadata.
         preserve_timestamps: Whether to retain original timestamps.
         preserve_extended_attributes: Whether to retain extended attributes.
+        rename_files: Whether to automatically rename files based on classification output.
     """
 
     conflict_resolution: str = Field(default="append_number")
@@ -99,6 +100,7 @@ class OrganizationOptions(DorgyBaseModel):
     preserve_language: bool = False
     preserve_timestamps: bool = True
     preserve_extended_attributes: bool = True
+    rename_files: bool = True
 
 
 class AmbiguitySettings(DorgyBaseModel):

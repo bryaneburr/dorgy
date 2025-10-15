@@ -6,7 +6,7 @@ import difflib
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Optional
 
 import click
 import yaml
@@ -14,6 +14,13 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
+from dorgy.classification import (
+    ClassificationBatch,
+    ClassificationCache,
+    ClassificationDecision,
+    ClassificationEngine,
+    ClassificationRequest,
+)
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
 from dorgy.ingestion import FileDescriptor, IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
@@ -62,11 +69,16 @@ def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
     node[path[-1]] = value
 
 
-def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
-    """Convert an ingestion descriptor into a persisted state record.
+def _descriptor_to_record(
+    descriptor: FileDescriptor,
+    decision: Optional[ClassificationDecision],
+    root: Path,
+) -> FileRecord:
+    """Convert ingestion and classification data into a state record.
 
     Args:
         descriptor: Descriptor produced by the ingestion pipeline.
+        decision: Classification decision associated with the descriptor, if any.
         root: Root directory for the collection.
 
     Returns:
@@ -77,14 +89,6 @@ def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
         relative = descriptor.path.relative_to(root)
     except ValueError:
         relative = descriptor.path
-
-    categories_value = descriptor.metadata.get("categories")
-    if isinstance(categories_value, str):
-        categories = [categories_value]
-    elif isinstance(categories_value, list):
-        categories = [str(item) for item in categories_value]
-    else:
-        categories = descriptor.tags
 
     last_modified = None
     modified_raw = descriptor.metadata.get("modified_at")
@@ -97,14 +101,161 @@ def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
         except ValueError:
             last_modified = None
 
+    categories: list[str] = []
+    tags: list[str] = descriptor.tags
+    confidence: Optional[float] = None
+    rename_suggestion: Optional[str] = None
+    reasoning: Optional[str] = None
+
+    needs_review = False
+
+    if decision is not None:
+        categories = [decision.primary_category]
+        categories.extend(decision.secondary_categories)
+        tags = decision.tags or categories
+        confidence = decision.confidence
+        rename_suggestion = decision.rename_suggestion
+        reasoning = decision.reasoning
+        needs_review = decision.needs_review
+
     return FileRecord(
         path=str(relative),
         hash=descriptor.hash,
-        tags=descriptor.tags,
+        tags=tags,
         categories=categories,
-        confidence=None,
+        confidence=confidence,
         last_modified=last_modified,
+        rename_suggestion=rename_suggestion,
+        reasoning=reasoning,
+        needs_review=needs_review,
     )
+
+
+def _run_classification(
+    descriptors: Iterable[FileDescriptor],
+    prompt: Optional[str],
+    root: Path,
+    dry_run: bool,
+    config: DorgyConfig,
+    cache: Optional[ClassificationCache],
+) -> ClassificationBatch:
+    """Run the classification engine with graceful degradation.
+
+    Args:
+        descriptors: Descriptors to classify.
+        prompt: Optional prompt supplied by the user.
+        root: Collection root path.
+        dry_run: Indicates whether we are in dry-run mode.
+        config: Loaded configuration object.
+        cache: Optional cache for reusing classification results.
+
+    Returns:
+        ClassificationBatch: Decisions and errors from the classification step.
+    """
+
+    descriptors = list(descriptors)
+    if not descriptors:
+        return ClassificationBatch()
+
+    if cache is not None:
+        cache.load()
+
+    decisions: list[Optional[ClassificationDecision]] = [None] * len(descriptors)
+    errors: list[str] = []
+    missing_requests: list[ClassificationRequest] = []
+    missing_indices: list[int] = []
+    missing_keys: list[Optional[str]] = []
+
+    for index, descriptor in enumerate(descriptors):
+        key = _decision_key(descriptor, root)
+        cached = cache.get(key) if cache is not None and key is not None else None
+        if cached is not None:
+            decisions[index] = cached
+        else:
+            missing_indices.append(index)
+            missing_keys.append(key)
+            missing_requests.append(
+                ClassificationRequest(
+                    descriptor=descriptor,
+                    prompt=prompt,
+                    collection_root=root,
+                )
+            )
+
+    if missing_requests:
+        engine = ClassificationEngine()
+        batch = engine.classify(missing_requests)
+        errors.extend(batch.errors)
+        for idx, decision, key in zip(missing_indices, batch.decisions, missing_keys, strict=False):
+            if decision is not None:
+                decisions[idx] = decision
+                if not dry_run and cache is not None and key is not None:
+                    cache.set(key, decision)
+
+    if cache is not None and not dry_run:
+        cache.save()
+
+    return ClassificationBatch(decisions=decisions, errors=errors)
+
+
+def _zip_decisions(
+    batch: ClassificationBatch,
+    descriptors: Iterable[FileDescriptor],
+) -> Iterable[tuple[Optional[ClassificationDecision], FileDescriptor]]:
+    """Zip decisions with descriptors, filling missing entries with ``None``.
+
+    Args:
+        batch: Result batch returned by the classification engine.
+        descriptors: Original descriptors from ingestion.
+
+    Yields:
+        Tuples of (decision or ``None``, descriptor).
+    """
+
+    decisions = list(batch.decisions)
+    descriptors = list(descriptors)
+    for index, descriptor in enumerate(descriptors):
+        decision = decisions[index] if index < len(decisions) else None
+        yield decision, descriptor
+
+
+def _relative_to_collection(path: Path, root: Path) -> str:
+    """Return the relative path of ``path`` to ``root`` if possible."""
+
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _decision_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
+    """Compute a stable cache key for a descriptor."""
+
+    if descriptor.hash:
+        return descriptor.hash
+    return _relative_to_collection(descriptor.path, root)
+
+
+def _apply_rename(path: Path, suggestion: str) -> Path:
+    """Rename ``path`` to match ``suggestion`` while avoiding collisions."""
+
+    suffix = path.suffix
+    sanitized = suggestion.strip()
+    if not sanitized:
+        return path
+
+    base_candidate = sanitized
+    candidate = path.with_name(f"{base_candidate}{suffix}")
+    counter = 1
+    while candidate.exists() and candidate != path:
+        candidate = path.with_name(f"{base_candidate}-{counter}{suffix}")
+        counter += 1
+
+    if candidate == path:
+        return path
+
+    path.rename(candidate)
+    return candidate
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -172,6 +323,7 @@ def org(
     )
     state_dir = Path(path).expanduser().resolve() / ".dorgy"
     staging_dir = None if dry_run else state_dir / "staging"
+    classification_cache = ClassificationCache(state_dir / "classifications.json")
 
     pipeline = IngestionPipeline(
         scanner=scanner,
@@ -184,29 +336,54 @@ def org(
     )
 
     result = pipeline.run([root])
+    classification_batch = _run_classification(
+        result.processed,
+        prompt,
+        root,
+        dry_run,
+        config,
+        classification_cache,
+    )
+
+    paired = list(_zip_decisions(classification_batch, result.processed))
+    confidence_threshold = config.ambiguity.confidence_threshold
+    for decision, descriptor in paired:
+        if decision is not None and decision.confidence < confidence_threshold:
+            decision.needs_review = True
+            if descriptor.path not in result.needs_review:
+                result.needs_review.append(descriptor.path)
 
     if json_output:
-        console.print_json(
-            data=[descriptor.model_dump(mode="python") for descriptor in result.processed]
-        )
+        payload = []
+        for decision, descriptor in paired:
+            payload.append(
+                {
+                    "descriptor": descriptor.model_dump(mode="python"),
+                    "classification": decision.model_dump(mode="python")
+                    if decision is not None
+                    else None,
+                }
+            )
+        console.print_json(data=payload)
     else:
-        table = Table(title=f"Ingestion preview for {root}")
+        table = Table(title=f"Organization preview for {root}")
         table.add_column("File", overflow="fold")
         table.add_column("Type")
         table.add_column("Size", justify="right")
-        table.add_column("Tags")
+        table.add_column("Category")
         table.add_column("Preview", overflow="fold")
-        for descriptor in result.processed:
+        for decision, descriptor in paired:
             metadata = descriptor.metadata
             try:
                 relative_path = descriptor.path.relative_to(root)
             except ValueError:
                 relative_path = descriptor.path
+            category = decision.primary_category if decision else "-"
             table.add_row(
                 str(relative_path),
                 descriptor.mime_type,
                 metadata.get("size_bytes", "?"),
-                ", ".join(descriptor.tags) or "-",
+                category,
                 (descriptor.preview or "")[:120],
             )
         console.print(table)
@@ -218,6 +395,16 @@ def org(
             console.print(
                 f"[yellow]{len(result.quarantined)} files marked for quarantine.[/yellow]"
             )
+        if classification_batch.decisions:
+            review_count = sum(
+                1
+                for decision in classification_batch.decisions
+                if decision is not None and decision.needs_review
+            )
+            console.print(
+                f"[green]Classification completed ({len(classification_batch.decisions)} files, "
+                f"{review_count} marked for review).[/green]"
+            )
         if prompt:
             console.print(
                 "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
@@ -226,9 +413,10 @@ def org(
             console.print(
                 "[yellow]Output path support is coming soon; files stay in place for now.[/yellow]"
             )
-        if result.errors:
+        combined_errors = [*result.errors, *classification_batch.errors]
+        if combined_errors:
             console.print("[red]Errors:[/red]")
-            for error in result.errors:
+            for error in combined_errors:
                 console.print(f"  - {error}")
 
     if dry_run:
@@ -261,8 +449,21 @@ def org(
     except MissingStateError:
         state = CollectionState(root=str(root))
 
-    for descriptor in result.processed:
-        record = _descriptor_to_record(descriptor, root)
+    for decision, descriptor in paired:
+        record = _descriptor_to_record(descriptor, decision, root)
+        old_relative = _relative_to_collection(descriptor.path, root)
+
+        if (
+            not dry_run
+            and config.organization.rename_files
+            and decision is not None
+            and decision.rename_suggestion
+        ):
+            descriptor.path = _apply_rename(descriptor.path, decision.rename_suggestion)
+            descriptor.display_name = descriptor.path.name
+            record.path = _relative_to_collection(descriptor.path, root)
+
+        state.files.pop(old_relative, None)
         state.files[record.path] = record
 
     repository.save(root, state)
@@ -275,10 +476,15 @@ def org(
             log_file.write(
                 f"[{timestamp}] processed={len(result.processed)} "
                 f"needs_review={len(result.needs_review)} "
-                f"quarantined={len(result.quarantined)} errors={len(result.errors)}\n"
+                f"quarantined={len(result.quarantined)} "
+                f"classification={len(classification_batch.decisions)} "
+                f"classification_errors={len(classification_batch.errors)} "
+                f"errors={len(result.errors)}\n"
             )
             for error in result.errors:
                 log_file.write(f"  error: {error}\n")
+            for error in classification_batch.errors:
+                log_file.write(f"  classification_error: {error}\n")
             for q_path in result.quarantined:
                 log_file.write(f"  quarantined: {q_path}\n")
     except OSError as exc:  # pragma: no cover - logging best effort

@@ -47,7 +47,36 @@ def test_cli_org_persists_state(tmp_path: Path) -> None:
     assert state_path.exists()
     state_data = json.loads(state_path.read_text(encoding="utf-8"))
     assert "doc.txt" in state_data["files"]
-    assert state_data["files"]["doc.txt"].get("hash")
+    record = state_data["files"]["doc.txt"]
+    assert record.get("hash")
+    assert "Documents" in record.get("categories", [])
+    assert record.get("rename_suggestion") == "doc"
+    assert record.get("needs_review") is True
+
+
+def test_cli_org_classification_updates_state(tmp_path: Path) -> None:
+    """Classification decisions should persist to state records."""
+
+    root = tmp_path / "classified"
+    root.mkdir()
+    (root / "invoice.pdf").write_text("amount", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("organization:\n  rename_files: false\n", encoding="utf-8")
+
+    result = runner.invoke(cli, ["org", str(root)], env=env)
+
+    assert result.exit_code == 0
+    state_path = root / ".dorgy" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    record = state["files"]["invoice.pdf"]
+    assert "Documents" in record["categories"]
+    assert record["rename_suggestion"] == "invoice"
+    assert record.get("confidence") is not None
+    assert record.get("needs_review") is True
 
 
 def test_cli_org_dry_run(tmp_path: Path) -> None:
@@ -110,3 +139,25 @@ def test_cli_org_quarantine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     quarantine_file = root / ".dorgy" / "quarantine" / "bad.txt"
     assert quarantine_file.exists()
     assert not bad_file.exists()
+
+
+def test_cli_org_renames_files_when_enabled(tmp_path: Path) -> None:
+    """Files are renamed when classification suggests a new name."""
+
+    root = tmp_path / "rename"
+    root.mkdir()
+    original = root / "Report 2020.TXT"
+    original.write_text("budget", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["org", str(root)], env=env)
+
+    assert result.exit_code == 0
+    renamed = root / "report-2020.TXT"
+    assert renamed.exists()
+    state_path = root / ".dorgy" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "report-2020.TXT" in state["files"]
+    assert state["files"]["report-2020.TXT"]["rename_suggestion"] == "report-2020"
