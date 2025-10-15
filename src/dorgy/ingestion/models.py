@@ -38,4 +38,3 @@ class IngestionResult(BaseModel):
     needs_review: List[Path] = Field(default_factory=list)
     quarantined: List[Path] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
-

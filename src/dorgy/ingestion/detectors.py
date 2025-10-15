@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 from typing import Tuple
+
+try:
+    import magic  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    magic = None
 
 
 class TypeDetector:
@@ -11,7 +17,24 @@ class TypeDetector:
 
     def detect(self, path: Path) -> Tuple[str, str]:
         """Return MIME type and normalized category."""
-        raise NotImplementedError("TypeDetector.detect will be implemented during ingestion feature work.")
+        mime = "application/octet-stream"
+        category = "unknown"
+
+        if magic is not None:
+            try:
+                mime = magic.from_file(str(path), mime=True)  # type: ignore[arg-type]
+            except Exception:  # pragma: no cover - magic failure
+                pass
+
+        if not mime or mime == "application/octet-stream":
+            guessed, _ = mimetypes.guess_type(str(path))
+            if guessed:
+                mime = guessed
+
+        if "/" in mime:
+            category = mime.split("/", 1)[0]
+
+        return mime, category
 
 
 class HashComputer:
@@ -19,4 +42,10 @@ class HashComputer:
 
     def compute(self, path: Path) -> str:
         """Return a hex digest representing the file contents."""
-        raise NotImplementedError("HashComputer.compute will be implemented during ingestion feature work.")
+        import hashlib
+
+        digest = hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(8192), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
