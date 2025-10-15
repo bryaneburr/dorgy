@@ -286,7 +286,7 @@ The project will progress through the following phases. Update the status column
 
 | Status | Phase | Scope Highlights |
 | ------ | ----- | ---------------- |
-| [ ] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) |
+| [~] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline |
 | [ ] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers |
 | [ ] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
 | [ ] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
@@ -298,8 +298,9 @@ The project will progress through the following phases. Update the status column
 
 ## Work Tracking
 
+- Status legend: `[ ]` not started · `[~]` in progress · `[x]` complete
+
 - Keep this specification synchronized with scope decisions and phase statuses.
 - Maintain a session log in `notes/STATUS.md` capturing progress, blockers, and planned next actions after each working block.
 - Use feature branches per phase (e.g., `feature/phase-0-foundations`) and merge only after pre-commit hooks and tests pass.
 - Capture automation-facing behaviors or integration updates in module-level `AGENTS.md` files when introduced.
-
