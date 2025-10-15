@@ -3,4 +3,3 @@
 
 class ConfigError(Exception):
     """Raised when configuration data cannot be processed."""
-

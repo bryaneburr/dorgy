@@ -18,7 +18,9 @@ def _fresh_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigMan
     return ConfigManager()
 
 
-def test_ensure_exists_creates_default_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensure_exists_creates_default_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager = _fresh_manager(tmp_path, monkeypatch)
 
     path = manager.ensure_exists()
@@ -32,7 +34,9 @@ def test_ensure_exists_creates_default_file(tmp_path: Path, monkeypatch: pytest.
     assert isinstance(config, DorgyConfig)
 
 
-def test_resolve_with_precedence_respects_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_with_precedence_respects_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager = _fresh_manager(tmp_path, monkeypatch)
     manager.ensure_exists()
 

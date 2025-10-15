@@ -18,4 +18,5 @@
 - Updated `SPEC.md` to mark Phase 0 complete and Phase 1 in progress; captured ingestion pipeline assumptions.
 - Implemented configuration persistence/resolution (file/env/CLI precedence), wired `dorgy config view|set|edit`, and added unit/CLI tests.
 - Documented configuration usage in README/AGENTS to guide future contributors.
-- Upcoming focus: extend state repository implementation, integrate config manager into future commands, and prep ingestion pipeline scaffolding.
+- Delivered state repository persistence helpers (`state.json`, `orig.json`, review/quarantine folders) with tests covering round-trips and error handling.
+- Upcoming focus: integrate configuration/state usage into future commands and prepare ingestion pipeline scaffolding.
