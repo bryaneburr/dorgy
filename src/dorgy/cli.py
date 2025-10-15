@@ -363,11 +363,14 @@ def org(
         root=root,
     )
     rename_map = {operation.source: operation.destination for operation in plan.renames}
+    move_map = {operation.source: operation.destination for operation in plan.moves}
 
     if json_output:
         payload = []
         for decision, descriptor in paired:
             rename_target = rename_map.get(descriptor.path)
+            move_key = rename_target if rename_target is not None else descriptor.path
+            move_target = move_map.get(move_key)
             payload.append(
                 {
                     "descriptor": descriptor.model_dump(mode="python"),
@@ -376,6 +379,7 @@ def org(
                     else None,
                     "operations": {
                         "rename": rename_target.as_posix() if rename_target is not None else None,
+                        "move": move_target.as_posix() if move_target is not None else None,
                     },
                 }
             )
@@ -474,13 +478,20 @@ def org(
             raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
 
     for decision, descriptor in paired:
-        old_path = descriptor.path
-        new_path = rename_map.get(old_path)
-        if not dry_run and new_path is not None:
-            descriptor.path = new_path
+        original_path = descriptor.path
+
+        rename_target = rename_map.get(original_path)
+        if rename_target is not None:
+            descriptor.path = rename_target
             descriptor.display_name = descriptor.path.name
+
+        move_target = move_map.get(descriptor.path)
+        if move_target is not None:
+            descriptor.path = move_target
+            descriptor.display_name = descriptor.path.name
+
         record = _descriptor_to_record(descriptor, decision, root)
-        old_relative = _relative_to_collection(old_path, root)
+        old_relative = _relative_to_collection(original_path, root)
 
         state.files.pop(old_relative, None)
         state.files[record.path] = record
@@ -498,6 +509,7 @@ def org(
                 f"quarantined={len(result.quarantined)} "
                 f"classification={len(classification_batch.decisions)} "
                 f"classification_errors={len(classification_batch.errors)} "
+                f"renames={len(plan.renames)} moves={len(plan.moves)} "
                 f"errors={len(result.errors)}\n"
             )
             for error in result.errors:
@@ -506,6 +518,10 @@ def org(
                 log_file.write(f"  classification_error: {error}\n")
             for q_path in result.quarantined:
                 log_file.write(f"  quarantined: {q_path}\n")
+            for rename_op in plan.renames:
+                log_file.write(f"  rename: {rename_op.source} -> {rename_op.destination}\n")
+            for move_op in plan.moves:
+                log_file.write(f"  move: {move_op.source} -> {move_op.destination}\n")
     except OSError as exc:  # pragma: no cover - logging best effort
         console.print(f"[yellow]Unable to update log file: {exc}[/yellow]")
 

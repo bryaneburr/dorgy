@@ -5,7 +5,7 @@ from pathlib import Path
 from dorgy.classification.models import ClassificationDecision
 from dorgy.ingestion.models import FileDescriptor
 from dorgy.organization.executor import OperationExecutor
-from dorgy.organization.models import OperationPlan, RenameOperation
+from dorgy.organization.models import MoveOperation, OperationPlan, RenameOperation
 from dorgy.organization.planner import OrganizerPlanner
 
 
@@ -72,3 +72,28 @@ def test_planner_resolves_conflicts(tmp_path: Path) -> None:
 
     destinations = {rename.destination.name for rename in plan.renames}
     assert destinations == {"report-1.txt", "report-2.txt"}
+
+
+def test_executor_rollback(tmp_path: Path) -> None:
+    source = tmp_path / "file.txt"
+    source.write_text("data", encoding="utf-8")
+    rename_dest = tmp_path / "file-renamed.txt"
+    move_dest = tmp_path / "folder" / "file-renamed.txt"
+
+    plan = OperationPlan(
+        renames=[RenameOperation(source=source, destination=rename_dest)],
+        moves=[MoveOperation(source=rename_dest, destination=move_dest)],
+    )
+
+    executor = OperationExecutor()
+    executor.apply(plan, root=tmp_path)
+
+    assert move_dest.exists()
+    assert not source.exists()
+
+    executor.rollback(tmp_path)
+
+    assert source.exists()
+    assert not move_dest.exists()
+    assert not rename_dest.exists()
+    assert not (tmp_path / ".dorgy" / "last_plan.json").exists()

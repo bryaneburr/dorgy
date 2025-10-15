@@ -46,12 +46,14 @@ def test_cli_org_persists_state(tmp_path: Path) -> None:
     state_path = root / ".dorgy" / "state.json"
     assert state_path.exists()
     state_data = json.loads(state_path.read_text(encoding="utf-8"))
-    assert "doc.txt" in state_data["files"]
-    record = state_data["files"]["doc.txt"]
+    assert "documents/doc.txt" in state_data["files"]
+    record = state_data["files"]["documents/doc.txt"]
     assert record.get("hash")
     assert "Documents" in record.get("categories", [])
     assert record.get("rename_suggestion") == "doc"
     assert record.get("needs_review") is True
+    final_path = root / "documents" / "doc.txt"
+    assert final_path.exists()
 
 
 def test_cli_org_classification_updates_state(tmp_path: Path) -> None:
@@ -72,7 +74,7 @@ def test_cli_org_classification_updates_state(tmp_path: Path) -> None:
     assert result.exit_code == 0
     state_path = root / ".dorgy" / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    record = state["files"]["invoice.pdf"]
+    record = state["files"]["documents/invoice.pdf"]
     assert "Documents" in record["categories"]
     assert record["rename_suggestion"] == "invoice"
     assert record.get("confidence") is not None
@@ -155,9 +157,9 @@ def test_cli_org_renames_files_when_enabled(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["org", str(root)], env=env)
 
     assert result.exit_code == 0
-    renamed = root / "report-2020.TXT"
+    renamed = root / "documents" / "report-2020.TXT"
     assert renamed.exists()
     state_path = root / ".dorgy" / "state.json"
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert "report-2020.TXT" in state["files"]
-    assert state["files"]["report-2020.TXT"]["rename_suggestion"] == "report-2020"
+    assert "documents/report-2020.TXT" in state["files"]
+    assert state["files"]["documents/report-2020.TXT"]["rename_suggestion"] == "report-2020"
