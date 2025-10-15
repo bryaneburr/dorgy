@@ -4,10 +4,12 @@ from pathlib import Path
 
 from PIL import Image
 
+from dorgy.config.models import CorruptedFilePolicy, LockedFilePolicy, ProcessingOptions
 from dorgy.ingestion import IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
+from dorgy.ingestion.models import PendingFile
 
 
 def test_directory_scanner_filters(tmp_path: Path) -> None:
@@ -40,6 +42,7 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
     image_path = tmp_path / "image.png"
     Image.new("RGB", (32, 16), color="red").save(image_path)
 
+    processing = ProcessingOptions()
     pipeline = IngestionPipeline(
         scanner=DirectoryScanner(
             recursive=True,
@@ -50,6 +53,7 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
         detector=TypeDetector(),
         hasher=HashComputer(),
         extractor=MetadataExtractor(),
+        processing=processing,
     )
 
     result = pipeline.run([tmp_path])
@@ -71,3 +75,71 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
 
     assert not result.needs_review
     assert not result.errors
+
+
+def test_ingestion_pipeline_quarantines_on_error(tmp_path: Path) -> None:
+    class FailingExtractor(MetadataExtractor):
+        def extract(self, path: Path, mime_type: str):  # type: ignore[override]
+            raise ValueError("boom")
+
+        def preview(self, path: Path, mime_type: str):  # type: ignore[override]
+            return None
+
+    file_path = tmp_path / "bad.txt"
+    file_path.write_text("broken", encoding="utf-8")
+
+    processing = ProcessingOptions(
+        corrupted_files=CorruptedFilePolicy(action="quarantine"),
+    )
+
+    pipeline = IngestionPipeline(
+        scanner=DirectoryScanner(
+            recursive=False,
+            include_hidden=True,
+            follow_symlinks=False,
+            max_size_bytes=None,
+        ),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=FailingExtractor(),
+        processing=processing,
+    )
+
+    result = pipeline.run([tmp_path])
+
+    assert not result.processed
+    assert file_path in result.quarantined
+    assert any("boom" in msg for msg in result.errors)
+
+
+def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
+    locked_file = tmp_path / "locked.txt"
+    locked_file.write_text("content", encoding="utf-8")
+
+    pending = PendingFile(
+        path=locked_file,
+        size_bytes=locked_file.stat().st_size,
+        locked=True,
+    )
+
+    class LockedScanner:
+        def scan(self, root: Path):  # type: ignore[override]
+            yield pending
+
+    processing = ProcessingOptions(
+        locked_files=LockedFilePolicy(action="skip"),
+    )
+
+    pipeline = IngestionPipeline(
+        scanner=LockedScanner(),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(),
+        processing=processing,
+    )
+
+    result = pipeline.run([tmp_path])
+
+    assert not result.processed
+    assert locked_file in result.needs_review
+    assert any("locked" in msg for msg in result.errors)

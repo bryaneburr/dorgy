@@ -53,8 +53,19 @@ class DirectoryScanner:
             if self.max_size_bytes is not None and stat.st_size > self.max_size_bytes:
                 continue
 
+            locked = False
+            try:
+                with path.open("rb"):
+                    pass
+            except PermissionError:
+                locked = True
+            except OSError:
+                locked = False
+
             modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-            yield PendingFile(path=path, size_bytes=stat.st_size, modified_at=modified)
+            yield PendingFile(
+                path=path, size_bytes=stat.st_size, modified_at=modified, locked=locked
+            )
 
     def _iter_paths(self, root: Path) -> Iterable[Path]:
         """Internal helper to iterate candidate paths."""

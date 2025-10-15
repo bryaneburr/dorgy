@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,7 @@ def org(
         detector=TypeDetector(),
         hasher=HashComputer(),
         extractor=MetadataExtractor(),
+        processing=config.processing,
     )
 
     result = pipeline.run([root])
@@ -167,6 +169,10 @@ def org(
             f"[green]Processed {len(result.processed)} files; "
             f"{len(result.needs_review)} flagged, {len(result.errors)} errors.[/green]"
         )
+        if result.quarantined:
+            console.print(
+                f"[yellow]{len(result.quarantined)} files marked for quarantine.[/yellow]"
+            )
         if prompt:
             console.print(
                 "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
@@ -185,6 +191,26 @@ def org(
         return
 
     repository = StateRepository()
+    state_dir = repository.initialize(root)
+    quarantine_dir = state_dir / "quarantine"
+    if result.quarantined and config.processing.corrupted_files.action == "quarantine":
+        moved_paths: list[Path] = []
+        for original in result.quarantined:
+            target = quarantine_dir / original.name
+            counter = 1
+            while target.exists():
+                target = target.with_name(f"{original.stem}-{counter}{original.suffix}")
+                counter += 1
+            try:
+                shutil.move(str(original), str(target))
+            except Exception as exc:  # pragma: no cover - filesystem issues
+                console.print(f"[red]Failed to quarantine {original}: {exc}[/red]")
+                result.errors.append(f"{original}: quarantine failed ({exc})")
+            else:
+                moved_paths.append(target)
+        result.quarantined = moved_paths
+        if moved_paths:
+            console.print(f"[yellow]Moved {len(moved_paths)} files to quarantine.[/yellow]")
     try:
         state = repository.load(root)
     except MissingStateError:

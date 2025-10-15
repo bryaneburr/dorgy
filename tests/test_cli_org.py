@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from dorgy.cli import cli
+from dorgy.ingestion.extractors import MetadataExtractor
 
 
 def _env_with_home(tmp_path: Path) -> dict[str, str]:
@@ -48,3 +50,35 @@ def test_cli_org_dry_run(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Dry run" in result.output
     assert not (root / ".dorgy").exists()
+
+
+def test_cli_org_quarantine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "broken"
+    root.mkdir()
+    bad_file = root / "bad.txt"
+    bad_file.write_text("oops", encoding="utf-8")
+
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "processing:\n  corrupted_files:\n    action: quarantine\n",
+        encoding="utf-8",
+    )
+
+    class FailingExtractor(MetadataExtractor):
+        def extract(self, path: Path, mime_type: str):  # type: ignore[override]
+            raise ValueError("broken")
+
+        def preview(self, path: Path, mime_type: str):  # type: ignore[override]
+            return None
+
+    monkeypatch.setattr("dorgy.cli.MetadataExtractor", FailingExtractor)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["org", str(root)], env=env)
+
+    assert result.exit_code == 0
+    quarantine_file = root / ".dorgy" / "quarantine" / "bad.txt"
+    assert quarantine_file.exists()
+    assert not bad_file.exists()
