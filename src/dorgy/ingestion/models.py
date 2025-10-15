@@ -10,7 +10,15 @@ from pydantic import BaseModel, Field
 
 
 class PendingFile(BaseModel):
-    """File discovered on disk awaiting processing."""
+    """File discovered on disk awaiting processing.
+
+    Attributes:
+        path: Absolute path to the pending file.
+        size_bytes: Size of the file in bytes.
+        modified_at: Timestamp of the last modification.
+        locked: Whether the file is currently locked.
+        oversized: Whether the file exceeds the configured size limit.
+    """
 
     path: Path
     size_bytes: int
@@ -20,7 +28,18 @@ class PendingFile(BaseModel):
 
 
 class FileDescriptor(BaseModel):
-    """Normalized description produced by ingestion."""
+    """Normalized description produced by ingestion.
+
+    Attributes:
+        path: Absolute path to the file.
+        display_name: Human-friendly name to present in the UI.
+        mime_type: Detected MIME type of the file.
+        hash: Optional content hash.
+        preview: Optional textual preview.
+        metadata: Additional metadata extracted from the file.
+        tags: Candidate tags describing the file.
+        needs_review: Whether manual review is required.
+    """
 
     path: Path
     display_name: str
@@ -33,7 +52,14 @@ class FileDescriptor(BaseModel):
 
 
 class IngestionResult(BaseModel):
-    """Aggregate result from running the ingestion pipeline."""
+    """Aggregate result from running the ingestion pipeline.
+
+    Attributes:
+        processed: Descriptors produced during ingestion.
+        needs_review: Paths that require manual review.
+        quarantined: Paths suggested for quarantine.
+        errors: Errors encountered during processing.
+    """
 
     processed: List[FileDescriptor] = Field(default_factory=list)
     needs_review: List[Path] = Field(default_factory=list)

@@ -1,4 +1,4 @@
-"""Configuration management for Dorgy."""
+"""Configuration management utilities for Dorgy."""
 
 from __future__ import annotations
 
@@ -33,12 +33,22 @@ class ConfigManager:
         *,
         env: Mapping[str, str] | None = None,
     ) -> None:
+        """Initialize a configuration manager.
+
+        Args:
+            config_path: Optional explicit path to the configuration file.
+            env: Environment mapping used when reading overrides.
+        """
         self._config_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
         self._env = env if env is not None else os.environ
 
     @property
     def config_path(self) -> Path:
-        """Return the resolved configuration path."""
+        """Return the resolved configuration path.
+
+        Returns:
+            Path: Absolute configuration file path.
+        """
         return self._config_path
 
     def load(
@@ -49,7 +59,20 @@ class ConfigManager:
         ensure_file: bool = True,
         env_overrides: Mapping[str, str] | None = None,
     ) -> DorgyConfig:
-        """Load configuration data from disk, applying precedence rules."""
+        """Load configuration data from disk, applying precedence rules.
+
+        Args:
+            cli_overrides: Overrides supplied programmatically or via CLI.
+            include_env: Whether to apply environment overrides.
+            ensure_file: Whether to create a config file if missing.
+            env_overrides: Explicit environment mapping to use instead of os.environ.
+
+        Returns:
+            DorgyConfig: Fully merged configuration model.
+
+        Raises:
+            ConfigError: If stored configuration cannot be parsed or validated.
+        """
         if ensure_file:
             self.ensure_exists()
 
@@ -68,16 +91,28 @@ class ConfigManager:
         )
 
     def load_file_overrides(self) -> dict[str, Any]:
-        """Return raw overrides stored on disk."""
+        """Return raw overrides stored on disk.
+
+        Returns:
+            dict[str, Any]: Mapping representing file-stored overrides.
+        """
         return self._read_file()
 
     def save(self, config: DorgyConfig | Mapping[str, Any]) -> None:
-        """Persist configuration data to disk."""
+        """Persist configuration data to disk.
+
+        Args:
+            config: Configuration model or mapping to write.
+        """
         data = self._coerce_to_dict(config)
         self._write_file(data, include_header=True)
 
     def ensure_exists(self) -> Path:
-        """Create a configuration file with defaults if one does not exist."""
+        """Create a configuration file with defaults if one does not exist.
+
+        Returns:
+            Path: Path to the configuration file.
+        """
         path = self._config_path
         if path.exists():
             return path
@@ -86,7 +121,11 @@ class ConfigManager:
         return path
 
     def read_text(self) -> str:
-        """Return the current configuration file contents."""
+        """Return the current configuration file contents.
+
+        Returns:
+            str: Raw YAML text of the configuration file.
+        """
         if not self._config_path.exists():
             return ""
         return self._config_path.read_text(encoding="utf-8")
@@ -94,11 +133,27 @@ class ConfigManager:
     # Internal helpers -------------------------------------------------
 
     def _coerce_to_dict(self, value: DorgyConfig | Mapping[str, Any]) -> dict[str, Any]:
+        """Coerce supported configuration inputs into dictionaries.
+
+        Args:
+            value: Model or mapping representing configuration data.
+
+        Returns:
+            dict[str, Any]: Mapping representation of the configuration.
+        """
         if isinstance(value, DorgyConfig):
             return value.model_dump(mode="python")
         return dict(value)
 
     def _read_file(self) -> dict[str, Any]:
+        """Read configuration overrides from disk.
+
+        Returns:
+            dict[str, Any]: Mapping representing file-based overrides.
+
+        Raises:
+            ConfigError: If the file cannot be parsed into a mapping.
+        """
         if not self._config_path.exists():
             return {}
 
@@ -113,6 +168,12 @@ class ConfigManager:
         return raw
 
     def _write_file(self, data: Mapping[str, Any], *, include_header: bool = False) -> None:
+        """Serialize configuration data to disk.
+
+        Args:
+            data: Mapping representation of configuration values.
+            include_header: Whether to prepend the generated file header.
+        """
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
         serialized = yaml.safe_dump(dict(data), sort_keys=False)
         header = _CONFIG_HEADER if include_header else ""
@@ -121,6 +182,14 @@ class ConfigManager:
         self._config_path.write_text(header + timestamp + serialized, encoding="utf-8")
 
     def _extract_env(self, env: Mapping[str, str]) -> dict[str, Any]:
+        """Parse environment variables into configuration overrides.
+
+        Args:
+            env: Mapping of environment variables to inspect.
+
+        Returns:
+            dict[str, Any]: Nested mapping of overrides derived from the environment.
+        """
         prefix = "DORGY__"
         overrides: dict[str, Any] = {}
         for key, raw_value in env.items():
@@ -140,6 +209,13 @@ class ConfigManager:
         return overrides
 
     def _assign_nested(self, target: dict[str, Any], path: list[str], value: Any) -> None:
+        """Assign a nested value inside a dictionary.
+
+        Args:
+            target: Mapping to modify in-place.
+            path: Sequence of keys describing the nested location.
+            value: Value to assign at the leaf node.
+        """
         current = target
         for segment in path[:-1]:
             existing = current.get(segment)

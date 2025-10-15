@@ -27,3 +27,9 @@
 - Wired ingestion pipeline into `dorgy org`, expanded metadata extraction for text/images/json, added CLI/state tests, and documented Phase 3 plan in SPEC.
 - Upcoming focus: integrate classification pipeline (Phase 3) atop the ingestion outputs and enhance error handling/quarantine flows.
 - Implemented locked-file copy/wait policies, oversized sampling, quarantine moves, and ingestion logging to `dorgy.log`; added tests covering these behaviours.
+
+## 2025-10-16 (cont.)
+- Replaced all Python module/class/function docstrings with Google-style format across src/ and tests/ to standardize documentation quality.
+- Updated `AGENTS.md` directives to mandate Google-style docstrings for future contributions.
+- Ran `uv run pre-commit run --all-files` to validate formatting, linting, and tests prior to push.
+- Next actions: audit SPEC.md for any docstring-related expectations that should be surfaced in upcoming phases.

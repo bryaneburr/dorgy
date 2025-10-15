@@ -1,4 +1,4 @@
-"""State management errors."""
+"""Exception hierarchy for state management operations."""
 
 
 class StateError(Exception):

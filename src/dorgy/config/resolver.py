@@ -20,7 +20,20 @@ def resolve_with_precedence(
     env_overrides: Mapping[str, Any] | None = None,
     cli_overrides: Mapping[str, Any] | None = None,
 ) -> DorgyConfig:
-    """Merge configuration sources according to the precedence defined in SPEC.md."""
+    """Merge configuration inputs into a validated config object.
+
+    Args:
+        defaults: Fully-populated configuration defaults.
+        file_overrides: Overrides loaded from the configuration file.
+        env_overrides: Mapping of environment variable-derived overrides.
+        cli_overrides: Overrides supplied via the CLI layer.
+
+    Returns:
+        DorgyConfig: The merged and validated configuration model.
+
+    Raises:
+        ConfigError: If merged values fail validation.
+    """
     baseline = defaults.model_dump(mode="python")
 
     merged = deepcopy(baseline)
@@ -41,11 +54,19 @@ def resolve_with_precedence(
 
 
 def flatten_for_env(config: DorgyConfig) -> Dict[str, str]:
-    """Flatten the config into `DORGY__SECTION__KEY` environment variable mappings."""
+    """Render configuration into `DORGY__SECTION__KEY` environment variables.
+
+    Args:
+        config: The configuration model to flatten.
+
+    Returns:
+        Dict[str, str]: Mapping of environment variable names to serialized values.
+    """
     flat: Dict[str, str] = {}
     data = config.model_dump(mode="python")
 
     def _recurse(prefix: list[str], value: Any) -> None:
+        """Populate the flattened mapping for a nested value."""
         if isinstance(value, dict):
             for key, child in value.items():
                 _recurse(prefix + [str(key)], child)
@@ -64,6 +85,18 @@ def flatten_for_env(config: DorgyConfig) -> Dict[str, str]:
 
 
 def _normalize_mapping(source: Mapping[str, Any], *, source_name: str) -> dict[str, Any]:
+    """Normalize overrides expressed through dotted keys into nested mappings.
+
+    Args:
+        source: Raw override mapping to normalize.
+        source_name: Human-readable label for the override source.
+
+    Returns:
+        dict[str, Any]: Nested mapping representing the overrides.
+
+    Raises:
+        ConfigError: If keys are not strings or values conflict structurally.
+    """
     if not isinstance(source, MappingABC):
         raise ConfigError(f"{source_name.capitalize()} overrides must be a mapping.")
 
@@ -77,6 +110,17 @@ def _normalize_mapping(source: Mapping[str, Any], *, source_name: str) -> dict[s
 
 
 def _assign(target: dict[str, Any], path: list[str], value: Any, *, source_name: str) -> None:
+    """Assign a value within a nested mapping, creating intermediate dictionaries.
+
+    Args:
+        target: Mapping to mutate.
+        path: Sequence of keys describing the nested location.
+        value: Value to assign at the nested location.
+        source_name: Origin label for error reporting.
+
+    Raises:
+        ConfigError: If the assignment collides with a non-mapping value.
+    """
     node = target
     for segment in path[:-1]:
         existing = node.get(segment)
@@ -101,6 +145,15 @@ def _assign(target: dict[str, Any], path: list[str], value: Any, *, source_name:
 
 
 def _deep_merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
+    """Recursively merge override mappings into a base mapping.
+
+    Args:
+        base: Original mapping to merge on top of.
+        overrides: Mapping providing replacement or nested values.
+
+    Returns:
+        dict[str, Any]: New mapping with overrides applied.
+    """
     merged: dict[str, Any] = {}
     for key, value in base.items():
         merged[key] = deepcopy(value)

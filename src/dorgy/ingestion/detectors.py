@@ -16,7 +16,14 @@ class TypeDetector:
     """Identify MIME type and file category using python-magic and heuristics."""
 
     def detect(self, path: Path) -> Tuple[str, str]:
-        """Return MIME type and normalized category."""
+        """Return MIME type and normalized category for a file.
+
+        Args:
+            path: Path to the file to inspect.
+
+        Returns:
+            Tuple[str, str]: MIME type and derived high-level category.
+        """
         mime = "application/octet-stream"
         category = "unknown"
 
@@ -41,7 +48,14 @@ class HashComputer:
     """Compute fast content hashes for deduplication."""
 
     def compute(self, path: Path) -> str:
-        """Return a hex digest representing the file contents."""
+        """Return a SHA-256 hex digest representing the file contents.
+
+        Args:
+            path: Path to the file whose contents should be hashed.
+
+        Returns:
+            str: Hexadecimal digest of the file contents.
+        """
         import hashlib
 
         digest = hashlib.sha256()

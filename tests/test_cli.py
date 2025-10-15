@@ -6,6 +6,7 @@ from dorgy.cli import cli
 
 
 def test_cli_help_displays_commands() -> None:
+    """Ensure CLI help enumerates primary commands."""
     runner = CliRunner()
     result = runner.invoke(cli, ["--help"])
 
