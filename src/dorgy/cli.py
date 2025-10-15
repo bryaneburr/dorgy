@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import difflib
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import click
 import yaml
 from rich.console import Console
 from rich.syntax import Syntax
+from rich.table import Table
 
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
+from dorgy.ingestion import FileDescriptor, IngestionPipeline
+from dorgy.ingestion.detectors import HashComputer, TypeDetector
+from dorgy.ingestion.discovery import DirectoryScanner
+from dorgy.ingestion.extractors import MetadataExtractor
+from dorgy.state import CollectionState, FileRecord, MissingStateError, StateRepository
 
 console = Console()
 
@@ -40,6 +49,43 @@ def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
     node[path[-1]] = value
 
 
+def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
+    """Convert an ingestion descriptor into a state record."""
+
+    try:
+        relative = descriptor.path.relative_to(root)
+    except ValueError:
+        relative = descriptor.path
+
+    categories_value = descriptor.metadata.get("categories")
+    if isinstance(categories_value, str):
+        categories = [categories_value]
+    elif isinstance(categories_value, list):
+        categories = [str(item) for item in categories_value]
+    else:
+        categories = descriptor.tags
+
+    last_modified = None
+    modified_raw = descriptor.metadata.get("modified_at")
+    if modified_raw:
+        try:
+            normalized = (
+                modified_raw.replace("Z", "+00:00") if modified_raw.endswith("Z") else modified_raw
+            )
+            last_modified = datetime.fromisoformat(normalized)
+        except ValueError:
+            last_modified = None
+
+    return FileRecord(
+        path=str(relative),
+        hash=descriptor.hash,
+        tags=descriptor.tags,
+        categories=categories,
+        confidence=None,
+        last_modified=last_modified,
+    )
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="dorgy")
 def cli() -> None:
@@ -57,9 +103,149 @@ def cli() -> None:
 )
 @click.option("--dry-run", is_flag=True, help="Preview changes without modifying files.")
 @click.option("--json", "json_output", is_flag=True, help="Emit JSON describing proposed changes.")
-def org(**_: object) -> None:
+def org(
+    path: str,
+    recursive: bool,
+    prompt: str | None,
+    output: str | None,
+    dry_run: bool,
+    json_output: bool,
+) -> None:
     """Organize files within PATH."""
-    _not_implemented("dorgy org")
+    manager = ConfigManager()
+    try:
+        manager.ensure_exists()
+        config = manager.load()
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    root = Path(path).expanduser().resolve()
+    recursive = recursive or config.processing.recurse_directories
+    include_hidden = config.processing.process_hidden_files
+    follow_symlinks = config.processing.follow_symlinks
+    max_size_bytes = None
+    if config.processing.max_file_size_mb > 0:
+        max_size_bytes = config.processing.max_file_size_mb * 1024 * 1024
+
+    scanner = DirectoryScanner(
+        recursive=recursive,
+        include_hidden=include_hidden,
+        follow_symlinks=follow_symlinks,
+        max_size_bytes=max_size_bytes,
+    )
+    state_dir = Path(path).expanduser().resolve() / ".dorgy"
+    staging_dir = None if dry_run else state_dir / "staging"
+
+    pipeline = IngestionPipeline(
+        scanner=scanner,
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(),
+        processing=config.processing,
+        staging_dir=staging_dir,
+        allow_writes=not dry_run,
+    )
+
+    result = pipeline.run([root])
+
+    if json_output:
+        console.print_json(
+            data=[descriptor.model_dump(mode="python") for descriptor in result.processed]
+        )
+    else:
+        table = Table(title=f"Ingestion preview for {root}")
+        table.add_column("File", overflow="fold")
+        table.add_column("Type")
+        table.add_column("Size", justify="right")
+        table.add_column("Tags")
+        table.add_column("Preview", overflow="fold")
+        for descriptor in result.processed:
+            metadata = descriptor.metadata
+            try:
+                relative_path = descriptor.path.relative_to(root)
+            except ValueError:
+                relative_path = descriptor.path
+            table.add_row(
+                str(relative_path),
+                descriptor.mime_type,
+                metadata.get("size_bytes", "?"),
+                ", ".join(descriptor.tags) or "-",
+                (descriptor.preview or "")[:120],
+            )
+        console.print(table)
+        console.print(
+            f"[green]Processed {len(result.processed)} files; "
+            f"{len(result.needs_review)} flagged, {len(result.errors)} errors.[/green]"
+        )
+        if result.quarantined:
+            console.print(
+                f"[yellow]{len(result.quarantined)} files marked for quarantine.[/yellow]"
+            )
+        if prompt:
+            console.print(
+                "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
+            )
+        if output:
+            console.print(
+                "[yellow]Output path support is coming soon; files stay in place for now.[/yellow]"
+            )
+        if result.errors:
+            console.print("[red]Errors:[/red]")
+            for error in result.errors:
+                console.print(f"  - {error}")
+
+    if dry_run:
+        console.print("[yellow]Dry run selected; skipping state persistence.[/yellow]")
+        return
+
+    repository = StateRepository()
+    state_dir = repository.initialize(root)
+    quarantine_dir = state_dir / "quarantine"
+    if result.quarantined and config.processing.corrupted_files.action == "quarantine":
+        moved_paths: list[Path] = []
+        for original in result.quarantined:
+            target = quarantine_dir / original.name
+            counter = 1
+            while target.exists():
+                target = target.with_name(f"{original.stem}-{counter}{original.suffix}")
+                counter += 1
+            try:
+                shutil.move(str(original), str(target))
+            except Exception as exc:  # pragma: no cover - filesystem issues
+                console.print(f"[red]Failed to quarantine {original}: {exc}[/red]")
+                result.errors.append(f"{original}: quarantine failed ({exc})")
+            else:
+                moved_paths.append(target)
+        result.quarantined = moved_paths
+        if moved_paths:
+            console.print(f"[yellow]Moved {len(moved_paths)} files to quarantine.[/yellow]")
+    try:
+        state = repository.load(root)
+    except MissingStateError:
+        state = CollectionState(root=str(root))
+
+    for descriptor in result.processed:
+        record = _descriptor_to_record(descriptor, root)
+        state.files[record.path] = record
+
+    repository.save(root, state)
+    console.print(f"[green]Persisted state for {len(result.processed)} files.[/green]")
+
+    log_path = state_dir / "dorgy.log"
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            log_file.write(
+                f"[{timestamp}] processed={len(result.processed)} "
+                f"needs_review={len(result.needs_review)} "
+                f"quarantined={len(result.quarantined)} errors={len(result.errors)}\n"
+            )
+            for error in result.errors:
+                log_file.write(f"  error: {error}\n")
+            for q_path in result.quarantined:
+                log_file.write(f"  quarantined: {q_path}\n")
+    except OSError as exc:  # pragma: no cover - logging best effort
+        console.print(f"[yellow]Unable to update log file: {exc}[/yellow]")
 
 
 @cli.command()

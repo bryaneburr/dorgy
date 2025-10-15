@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,8 +30,21 @@ class ProcessingOptions(DorgyBaseModel):
     process_audio: bool = False
     follow_symlinks: bool = False
     process_hidden_files: bool = False
+    recurse_directories: bool = False
     max_file_size_mb: int = 100
     sample_size_mb: int = 10
+    locked_files: "LockedFilePolicy" = Field(default_factory=lambda: LockedFilePolicy())
+    corrupted_files: "CorruptedFilePolicy" = Field(default_factory=lambda: CorruptedFilePolicy())
+
+
+class LockedFilePolicy(DorgyBaseModel):
+    action: Literal["copy", "skip", "wait"] = "copy"
+    retry_attempts: int = 3
+    retry_delay_seconds: int = 5
+
+
+class CorruptedFilePolicy(DorgyBaseModel):
+    action: Literal["skip", "quarantine"] = "skip"
 
 
 class OrganizationOptions(DorgyBaseModel):
@@ -71,6 +84,8 @@ __all__ = [
     "DorgyBaseModel",
     "LLMSettings",
     "ProcessingOptions",
+    "LockedFilePolicy",
+    "CorruptedFilePolicy",
     "OrganizationOptions",
     "AmbiguitySettings",
     "LoggingSettings",

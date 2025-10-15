@@ -20,3 +20,10 @@
 - Documented configuration usage in README/AGENTS to guide future contributors.
 - Delivered state repository persistence helpers (`state.json`, `orig.json`, review/quarantine folders) with tests covering round-trips and error handling.
 - Phase 1 complete; SPEC table updated accordingly. Upcoming focus: integrate configuration/state usage into future commands and begin Phase 2 ingestion scaffolding.
+
+## 2025-10-16
+- Created `feature/phase-2-ingestion` branch and expanded SPEC with detailed ingestion architecture goals/deliverables.
+- Next actions: scaffold ingestion modules (`discovery`, `detectors`, `extractors`, `pipeline`), introduce Pydantic models for descriptors, and add placeholder tests.
+- Wired ingestion pipeline into `dorgy org`, expanded metadata extraction for text/images/json, added CLI/state tests, and documented Phase 3 plan in SPEC.
+- Upcoming focus: integrate classification pipeline (Phase 3) atop the ingestion outputs and enhance error handling/quarantine flows.
+- Implemented locked-file copy/wait policies, oversized sampling, quarantine moves, and ingestion logging to `dorgy.log`; added tests covering these behaviours.
