@@ -286,7 +286,7 @@ The project will progress through the following phases. Update the status column
 
 | Status | Phase | Scope Highlights |
 | ------ | ----- | ---------------- |
-| [ ] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) |
+| [~] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline + config/state scaffolding |
 | [ ] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers |
 | [ ] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
 | [ ] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
@@ -298,8 +298,42 @@ The project will progress through the following phases. Update the status column
 
 ## Work Tracking
 
+- Status legend: `[ ]` not started · `[~]` in progress · `[x]` complete
+
 - Keep this specification synchronized with scope decisions and phase statuses.
 - Maintain a session log in `notes/STATUS.md` capturing progress, blockers, and planned next actions after each working block.
 - Use feature branches per phase (e.g., `feature/phase-0-foundations`) and merge only after pre-commit hooks and tests pass.
 - Capture automation-facing behaviors or integration updates in module-level `AGENTS.md` files when introduced.
 
+## Phase 1 – Config & State Details
+
+### Goals
+- Deliver a configuration management layer that reads defaults from `SPEC.md`, merges user overrides from `~/.dorgy/config.yaml`, environment variables, and CLI flags.
+- Provide persistence helpers that can bootstrap missing config files with commented examples.
+- Wire the CLI `config` subcommands (`view`, `set`, `edit`) to the configuration manager with minimal UX niceties (pretty table output via Rich, validation errors surfaced to the user).
+- Establish state repository contracts for saving collection metadata; implementation remains skeletal but should support in-memory stubs for testing downstream features.
+
+### Configuration Precedence
+1. CLI flags (command-specific overrides)
+2. Environment variables (`DORGY__SECTION__KEY` naming convention)
+3. User config file at `~/.dorgy/config.yaml`
+4. Built-in defaults defined in `dorgy.config.models`
+
+### CLI Behavior Expectations
+- `dorgy config view` prints the effective configuration using syntax-highlighted YAML.
+- `dorgy config set SECTION.KEY --value VALUE` updates the persisted YAML and echoes the diff.
+- `dorgy config edit` opens the file in `$EDITOR` (fallback to `vi`) and validates the result before saving; rollback if validation fails.
+
+### Deliverables
+- Concrete implementations for `ConfigManager.load/save/ensure_exists`.
+- Utility for resolving settings with precedence (exposed via `dorgy.config.resolver` helper).
+- Tests covering environment overrides, file persistence, and CLI command flows (using Click's `CliRunner`).
+- Documentation updates in `README.md` and `AGENTS.md` describing configuration usage and automation hooks for the new behavior.
+
+## Phase 2 – Content Ingestion Assumptions
+
+- File discovery walks directories using `pathlib.Path.rglob` with filters applied for hidden files, symlinks, and size thresholds determined by config.
+- `python-magic` resolves MIME types; `Pillow` and `docling` handle previews/metadata depending on file type.
+- Large files above `processing.max_file_size_mb` will be sampled to `processing.sample_size_mb` before analysis.
+- Locked files follow the `processing.locked_files` policy (copy/skip/wait) with configurable retries.
+- `StateRepository` will persist `orig.json`, `needs-review/`, `quarantine/`, and other metadata under `.dorgy/`.
