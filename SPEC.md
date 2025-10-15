@@ -337,3 +337,20 @@ The project will progress through the following phases. Update the status column
 - Large files above `processing.max_file_size_mb` will be sampled to `processing.sample_size_mb` before analysis.
 - Locked files follow the `processing.locked_files` policy (copy/skip/wait) with configurable retries.
 - `StateRepository` will persist `orig.json`, `needs-review/`, `quarantine/`, and other metadata under `.dorgy/`.
+
+### Goals
+- Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.
+- Respect configuration toggles for recursion, hidden files, symlink handling, maximum sizes, and locked/corrupted file policies.
+- Capture discovery/processing metrics for progress reporting and logging.
+
+### Architecture Outline
+- `dorgy.ingestion.discovery.DirectoryScanner`: surfaces candidate paths respecting filters and produces `PendingFile` records with basic filesystem metadata.
+- `dorgy.ingestion.detectors.TypeDetector`: wraps `python-magic` and quick heuristics to determine MIME/type families.
+- `dorgy.ingestion.extractors.MetadataExtractor`: coordinates `docling`, `Pillow`, and other adapters to generate previews/content snippets.
+- `dorgy.ingestion.pipeline.IngestionPipeline`: orchestrates the above components, handles batching/parallelism, and emits `FileDescriptor` models along with error buckets (`needs_review`, `quarantine`).
+
+### Deliverables
+- Module scaffolding with Pydantic models for `PendingFile`, `FileDescriptor`, `IngestionResult`.
+- Interfaces/classes with `NotImplementedError` placeholders for discovery, detection, and extraction behaviors.
+- Tests confirming scaffolding entry points exist and raise `NotImplementedError` where implementation will follow.
+- Documentation updates (README/AGENTS) highlighting ingestion pipeline layout and configuration touchpoints.

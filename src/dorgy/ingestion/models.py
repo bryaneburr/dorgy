@@ -1,0 +1,41 @@
+"""Data models used by the ingestion pipeline."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+class PendingFile(BaseModel):
+    """File discovered on disk awaiting processing."""
+
+    path: Path
+    size_bytes: int
+    modified_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    locked: bool = False
+
+
+class FileDescriptor(BaseModel):
+    """Normalized description produced by ingestion."""
+
+    path: Path
+    display_name: str
+    mime_type: str
+    hash: Optional[str] = None
+    preview: Optional[str] = None
+    metadata: Dict[str, str] = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    needs_review: bool = False
+
+
+class IngestionResult(BaseModel):
+    """Aggregate result from running the ingestion pipeline."""
+
+    processed: List[FileDescriptor] = Field(default_factory=list)
+    needs_review: List[Path] = Field(default_factory=list)
+    quarantined: List[Path] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
