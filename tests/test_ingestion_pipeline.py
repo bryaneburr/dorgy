@@ -30,9 +30,12 @@ def test_directory_scanner_filters(tmp_path: Path) -> None:
     )
 
     found = list(scanner.scan(tmp_path))
+    names = sorted(item.path.name for item in found)
 
-    assert [item.path.name for item in found] == ["visible.txt"]
-    assert found[0].size_bytes == 5
+    assert names == ["oversized.bin", "visible.txt"]
+    oversized_entry = next(item for item in found if item.path.name == "oversized.bin")
+    assert oversized_entry.oversized is True
+    assert next(item for item in found if item.path.name == "visible.txt").size_bytes == 5
 
 
 def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
@@ -77,12 +80,42 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
     assert not result.errors
 
 
+def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
+    large_file = tmp_path / "large.txt"
+    large_file.write_text("A" * 4096, encoding="utf-8")
+
+    processing = ProcessingOptions(max_file_size_mb=0, sample_size_mb=1)
+
+    pipeline = IngestionPipeline(
+        scanner=DirectoryScanner(
+            recursive=False,
+            include_hidden=True,
+            follow_symlinks=False,
+            max_size_bytes=512,
+        ),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(),
+        processing=processing,
+    )
+
+    result = pipeline.run([tmp_path])
+
+    descriptor = result.processed[0]
+    assert descriptor.metadata.get("oversized") == "true"
+    assert descriptor.metadata.get("sample_limit") == str(processing.sample_size_mb * 1024 * 1024)
+
+
 def test_ingestion_pipeline_quarantines_on_error(tmp_path: Path) -> None:
     class FailingExtractor(MetadataExtractor):
-        def extract(self, path: Path, mime_type: str):  # type: ignore[override]
+        def extract(  # type: ignore[override]
+            self, path: Path, mime_type: str, sample_limit: int | None = None
+        ) -> dict[str, str]:
             raise ValueError("boom")
 
-        def preview(self, path: Path, mime_type: str):  # type: ignore[override]
+        def preview(  # type: ignore[override]
+            self, path: Path, mime_type: str, sample_limit: int | None = None
+        ) -> str | None:
             return None
 
     file_path = tmp_path / "bad.txt"
@@ -143,3 +176,38 @@ def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
     assert not result.processed
     assert locked_file in result.needs_review
     assert any("locked" in msg for msg in result.errors)
+
+
+def test_ingestion_pipeline_copies_locked_files(tmp_path: Path) -> None:
+    locked_file = tmp_path / "locked.txt"
+    locked_file.write_text("content", encoding="utf-8")
+
+    pending = PendingFile(
+        path=locked_file,
+        size_bytes=locked_file.stat().st_size,
+        locked=True,
+    )
+
+    class LockedScanner:
+        def scan(self, root: Path):  # type: ignore[override]
+            yield pending
+
+    staging_dir = tmp_path / "staging"
+    processing = ProcessingOptions(locked_files=LockedFilePolicy(action="copy"))
+
+    pipeline = IngestionPipeline(
+        scanner=LockedScanner(),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(),
+        processing=processing,
+        staging_dir=staging_dir,
+    )
+
+    result = pipeline.run([tmp_path])
+
+    assert len(result.processed) == 1
+    descriptor = result.processed[0]
+    assert descriptor.metadata.get("processed_from_copy")
+    assert not list(staging_dir.glob("*"))
+    assert locked_file not in result.needs_review

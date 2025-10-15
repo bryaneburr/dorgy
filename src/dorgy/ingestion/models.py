@@ -16,6 +16,7 @@ class PendingFile(BaseModel):
     size_bytes: int
     modified_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     locked: bool = False
+    oversized: bool = False
 
 
 class FileDescriptor(BaseModel):

@@ -35,3 +35,4 @@ Refer to `AGENTS.md` for automation guidelines and team coordination expectation
 - Configuration lives at `~/.dorgy/config.yaml`. Run `uv run dorgy config view` to inspect the effective settings (including environment overrides).
 - Update individual values via `uv run dorgy config set section.key --value <value>` or edit the entire file with `uv run dorgy config edit` (validation runs before saving).
 - Environment variables follow the `DORGY__SECTION__KEY` naming convention and take precedence over file values; CLI-provided overrides always win for a given invocation.
+- Locked/corrupted file handling is governed by `processing.locked_files` and `processing.corrupted_files`; use `copy|skip|wait` or `quarantine|skip` to steer ingestion behaviour.

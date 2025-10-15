@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import difflib
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -69,7 +69,10 @@ def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
     modified_raw = descriptor.metadata.get("modified_at")
     if modified_raw:
         try:
-            last_modified = datetime.fromisoformat(modified_raw)
+            normalized = (
+                modified_raw.replace("Z", "+00:00") if modified_raw.endswith("Z") else modified_raw
+            )
+            last_modified = datetime.fromisoformat(normalized)
         except ValueError:
             last_modified = None
 
@@ -130,12 +133,17 @@ def org(
         follow_symlinks=follow_symlinks,
         max_size_bytes=max_size_bytes,
     )
+    state_dir = Path(path).expanduser().resolve() / ".dorgy"
+    staging_dir = None if dry_run else state_dir / "staging"
+
     pipeline = IngestionPipeline(
         scanner=scanner,
         detector=TypeDetector(),
         hasher=HashComputer(),
         extractor=MetadataExtractor(),
         processing=config.processing,
+        staging_dir=staging_dir,
+        allow_writes=not dry_run,
     )
 
     result = pipeline.run([root])
@@ -222,6 +230,22 @@ def org(
 
     repository.save(root, state)
     console.print(f"[green]Persisted state for {len(result.processed)} files.[/green]")
+
+    log_path = state_dir / "dorgy.log"
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            timestamp = datetime.now(timezone.utc).isoformat()
+            log_file.write(
+                f"[{timestamp}] processed={len(result.processed)} "
+                f"needs_review={len(result.needs_review)} "
+                f"quarantined={len(result.quarantined)} errors={len(result.errors)}\n"
+            )
+            for error in result.errors:
+                log_file.write(f"  error: {error}\n")
+            for q_path in result.quarantined:
+                log_file.write(f"  quarantined: {q_path}\n")
+    except OSError as exc:  # pragma: no cover - logging best effort
+        console.print(f"[yellow]Unable to update log file: {exc}[/yellow]")
 
 
 @cli.command()

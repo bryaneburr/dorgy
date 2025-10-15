@@ -26,3 +26,4 @@
 - Next actions: scaffold ingestion modules (`discovery`, `detectors`, `extractors`, `pipeline`), introduce Pydantic models for descriptors, and add placeholder tests.
 - Wired ingestion pipeline into `dorgy org`, expanded metadata extraction for text/images/json, added CLI/state tests, and documented Phase 3 plan in SPEC.
 - Upcoming focus: integrate classification pipeline (Phase 3) atop the ingestion outputs and enhance error handling/quarantine flows.
+- Implemented locked-file copy/wait policies, oversized sampling, quarantine moves, and ingestion logging to `dorgy.log`; added tests covering these behaviours.

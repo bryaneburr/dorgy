@@ -50,8 +50,9 @@ class DirectoryScanner:
                 stat = path.stat(follow_symlinks=self.follow_symlinks)
             except OSError:
                 continue
+            oversized = False
             if self.max_size_bytes is not None and stat.st_size > self.max_size_bytes:
-                continue
+                oversized = True
 
             locked = False
             try:
@@ -64,7 +65,11 @@ class DirectoryScanner:
 
             modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
             yield PendingFile(
-                path=path, size_bytes=stat.st_size, modified_at=modified, locked=locked
+                path=path,
+                size_bytes=stat.st_size,
+                modified_at=modified,
+                locked=locked,
+                oversized=oversized,
             )
 
     def _iter_paths(self, root: Path) -> Iterable[Path]:

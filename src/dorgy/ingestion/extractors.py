@@ -17,7 +17,9 @@ except ImportError:  # pragma: no cover - executed when Pillow missing
 class MetadataExtractor:
     """Extract structured metadata and previews for a file."""
 
-    def extract(self, path: Path, mime_type: str) -> Dict[str, str]:
+    def extract(
+        self, path: Path, mime_type: str, sample_limit: int | None = None
+    ) -> Dict[str, str]:
         """Return metadata key/value pairs for the file."""
         try:
             stat = path.stat()
@@ -32,9 +34,10 @@ class MetadataExtractor:
         }
 
         if mime_type.startswith("text") or mime_type in {"application/json", "application/xml"}:
+            limit = sample_limit or 2048
             try:
                 with path.open("r", encoding="utf-8", errors="replace") as fh:
-                    sample = fh.read(2048)
+                    sample = fh.read(limit)
             except OSError:
                 sample = ""
             if sample:
@@ -68,12 +71,13 @@ class MetadataExtractor:
 
         return metadata
 
-    def preview(self, path: Path, mime_type: str) -> Optional[str]:
+    def preview(self, path: Path, mime_type: str, sample_limit: int | None = None) -> Optional[str]:
         """Return a short textual preview of the file content."""
         if mime_type.startswith("text") or mime_type in {"application/json", "application/xml"}:
+            limit = min(sample_limit, 512) if sample_limit else 512
             try:
                 with path.open("r", encoding="utf-8", errors="replace") as fh:
-                    snippet = fh.read(512).strip()
+                    snippet = fh.read(limit).strip()
             except OSError:
                 return None
             return snippet or None

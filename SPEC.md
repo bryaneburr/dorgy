@@ -338,6 +338,13 @@ The project will progress through the following phases. Update the status column
 - Locked files follow the `processing.locked_files` policy (copy/skip/wait) with configurable retries.
 - `StateRepository` will persist `orig.json`, `needs-review/`, `quarantine/`, and other metadata under `.dorgy/`.
 
+### Progress Summary
+- Directory scanning honours hidden/symlink/size policies and flags oversized files for sampling.
+- Metadata extraction captures text/json previews, image EXIF data, and records when sampling/truncation occurs.
+- Locked file handling supports skip/wait/copy actions; copy operations stage files safely before cleanup.
+- Corrupted files respect the `quarantine` policy, with CLI feedback and state/log updates.
+- `dorgy org` now wires the ingestion pipeline, dry-run preview, JSON output, and state persistence.
+
 ## Phase 3 – LLM & DSPy Integration Goals
 
 - Convert `FileDescriptor` outputs into DSPy `FileClassification` and `FileRenaming` signatures, capturing reasoning, tags, and confidence scores.
