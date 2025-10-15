@@ -164,6 +164,8 @@ class OrganizerPlanner:
             source=path,
             destination=resolution.destination,
             reasoning=reasoning,
+            conflict_strategy=strategy,
+            conflict_applied=resolution.conflict_applied,
         ), resolution.note
 
     def _build_metadata_operation(
@@ -247,6 +249,8 @@ class OrganizerPlanner:
             source=current_path,
             destination=resolution.destination,
             reasoning=reasoning,
+            conflict_strategy=strategy,
+            conflict_applied=resolution.conflict_applied,
         ), resolution.note
 
     def _sanitize_filename(self, value: str) -> str:

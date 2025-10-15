@@ -5,3 +5,4 @@
 - Conflict handling ensures both filesystem and planned destinations remain unique and appends notes summarizing how collisions were resolved; update `tests/test_organization_scaffolding.py` when modifying conflict or undo semantics.
 - CLI integration composes rename + move plans; avoid modifying descriptors in-place outside organized sections to keep state updates consistent.
 - CLI prints `plan.notes` when present so contributors should keep messages concise and user-facing.
+- Rename/Move operations now carry `conflict_strategy`/`conflict_applied` metadata, and `OperationExecutor.apply` returns structured history events; callers must forward these to `StateRepository.append_history`.

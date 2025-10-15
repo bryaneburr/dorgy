@@ -44,10 +44,16 @@ def test_executor_applies_rename(tmp_path: Path) -> None:
     plan = OperationPlan(renames=[RenameOperation(source=source, destination=destination)])
     executor = OperationExecutor()
 
-    executor.apply(plan, root=tmp_path)
+    events = executor.apply(plan, root=tmp_path)
 
     assert not source.exists()
     assert destination.exists()
+    assert len(events) == 1
+    event = events[0]
+    assert event.operation == "rename"
+    assert event.source == "old.txt"
+    assert event.destination == "new.txt"
+    assert event.conflict_applied is False
 
 
 def test_planner_resolves_conflicts(tmp_path: Path) -> None:
@@ -73,6 +79,8 @@ def test_planner_resolves_conflicts(tmp_path: Path) -> None:
 
     destinations = {rename.destination.name for rename in plan.renames}
     assert destinations == {"report-1.txt", "report-2.txt"}
+    assert all(rename.conflict_applied for rename in plan.renames)
+    assert {rename.conflict_strategy for rename in plan.renames} == {"append_number"}
 
 
 def test_planner_skip_conflict_policy(tmp_path: Path) -> None:
@@ -129,6 +137,8 @@ def test_planner_timestamp_conflict_policy(tmp_path: Path) -> None:
 
     assert plan.renames[0].destination.name == "report-20240101-120000.txt"
     assert any("timestamp" in note.lower() for note in plan.notes)
+    assert plan.renames[0].conflict_applied is True
+    assert plan.renames[0].conflict_strategy == "timestamp"
 
 
 def test_executor_rollback(tmp_path: Path) -> None:

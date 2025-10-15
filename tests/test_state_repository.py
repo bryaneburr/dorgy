@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,7 @@ from dorgy.state import (
     DEFAULT_STATE_DIRNAME,
     CollectionState,
     MissingStateError,
+    OperationEvent,
     StateError,
     StateRepository,
 )
@@ -43,6 +46,7 @@ def test_initialize_creates_expected_structure(tmp_path: Path) -> None:
     assert (directory / "needs-review").is_dir()
     assert (directory / "quarantine").is_dir()
     assert (directory / "orig.json").exists()
+    assert (directory / "history.jsonl").exists()
 
 
 def test_save_and_load_round_trip(tmp_path: Path) -> None:
@@ -101,3 +105,29 @@ def test_original_structure_helpers(tmp_path: Path) -> None:
     loaded = repo.load_original_structure(tmp_path)
 
     assert loaded == tree
+
+
+def test_append_history_persists_events(tmp_path: Path) -> None:
+    """Ensure operation history events are appended to the history log."""
+
+    repo = StateRepository()
+    event = OperationEvent(
+        timestamp=datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc),
+        operation="rename",
+        source="old.txt",
+        destination="new.txt",
+        conflict_strategy="append_number",
+        conflict_applied=True,
+        notes=["rename applied"],
+    )
+
+    repo.append_history(tmp_path, [event])
+
+    history_path = tmp_path / DEFAULT_STATE_DIRNAME / "history.jsonl"
+    assert history_path.exists()
+    lines = history_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["operation"] == "rename"
+    assert payload["conflict_applied"] is True
+    assert payload["destination"] == "new.txt"

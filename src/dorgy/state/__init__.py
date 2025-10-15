@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .errors import MissingStateError, StateError
-from .models import CollectionState, FileRecord
+from .models import CollectionState, FileRecord, OperationEvent
 
 DEFAULT_STATE_DIRNAME = ".dorgy"
 
@@ -76,6 +76,25 @@ class StateRepository:
         )
         (directory / "dorgy.log").touch(exist_ok=True)
 
+    def append_history(self, root: Path, events: Iterable[OperationEvent]) -> None:
+        """Append operation history events to the collection log.
+
+        Args:
+            root: Root path of the collection.
+            events: Iterable of events to append.
+        """
+        events = list(events)
+        if not events:
+            return
+
+        directory = self.initialize(root)
+        history_path = directory / "history.jsonl"
+        with history_path.open("a", encoding="utf-8") as history_file:
+            for event in events:
+                payload = event.model_dump(mode="json")
+                history_file.write(json.dumps(payload))
+                history_file.write("\n")
+
     def initialize(self, root: Path) -> Path:
         """Prepare the metadata directories for a tracked collection.
 
@@ -90,6 +109,7 @@ class StateRepository:
         (directory / "needs-review").mkdir(exist_ok=True)
         (directory / "quarantine").mkdir(exist_ok=True)
         (directory / "orig.json").touch(exist_ok=True)
+        (directory / "history.jsonl").touch(exist_ok=True)
         return directory
 
     def write_original_structure(self, root: Path, tree: dict[str, Any]) -> None:
@@ -139,6 +159,7 @@ __all__ = [
     "DEFAULT_STATE_DIRNAME",
     "CollectionState",
     "FileRecord",
+    "OperationEvent",
     "StateError",
     "MissingStateError",
 ]

@@ -48,4 +48,5 @@
 - Extended the organization planner to honour `organization.conflict_resolution` (append_number, timestamp, skip) with timestamp injection for tests and surfaced `plan.notes` through the CLI.
 - Added timestamp/skip collision coverage to `tests/test_organization_scaffolding.py`, updated SPEC and organization AGENTS guidance, and confirmed behaviour via `uv run pytest`.
 - Observed test suite summary: 37 passed, 1 skipped (DSPy optional dependency).
-- Next actions: capture richer operation history artifacts (pre/post path snapshots, timestamps) and assess requirements for watch/mv command integration ahead of Phase 5.
+- Next actions: wire history playback into undo/status commands and outline transactional staging requirements before expanding to watch/mv integration for Phase 5.
+- Persisted rename/move history events to `.dorgy/history.jsonl`, exposed `OperationEvent` models, and wired `StateRepository.append_history` with executor-generated records. Updated state tests/docs accordingly and re-ran `uv run pytest` (38 passed, 1 skipped) to verify the new logging.

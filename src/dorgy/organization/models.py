@@ -9,19 +9,39 @@ from pydantic import BaseModel, Field
 
 
 class RenameOperation(BaseModel):
-    """Represents a file rename action."""
+    """Represents a file rename action.
+
+    Attributes:
+        source: Original file path prior to the rename.
+        destination: Target path after the rename.
+        reasoning: Optional explanation for the rename.
+        conflict_strategy: Conflict policy applied when resolving name collisions.
+        conflict_applied: Indicates whether a conflict was encountered.
+    """
 
     source: Path
     destination: Path
     reasoning: Optional[str] = None
+    conflict_strategy: Optional[str] = None
+    conflict_applied: bool = False
 
 
 class MoveOperation(BaseModel):
-    """Represents moving a file to a new directory."""
+    """Represents moving a file to a new directory.
+
+    Attributes:
+        source: Starting file path before the move.
+        destination: Destination path after the move.
+        reasoning: Optional explanation for the move.
+        conflict_strategy: Conflict policy applied when resolving destination collisions.
+        conflict_applied: Indicates whether a conflict was encountered.
+    """
 
     source: Path
     destination: Path
     reasoning: Optional[str] = None
+    conflict_strategy: Optional[str] = None
+    conflict_applied: bool = False
 
 
 class MetadataOperation(BaseModel):

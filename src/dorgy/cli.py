@@ -28,7 +28,13 @@ from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
 from dorgy.organization.executor import OperationExecutor
 from dorgy.organization.planner import OrganizerPlanner
-from dorgy.state import CollectionState, FileRecord, MissingStateError, StateRepository
+from dorgy.state import (
+    CollectionState,
+    FileRecord,
+    MissingStateError,
+    OperationEvent,
+    StateRepository,
+)
 
 console = Console()
 
@@ -478,9 +484,10 @@ def org(
         state = CollectionState(root=str(root))
 
     executor = OperationExecutor()
+    events: list[OperationEvent] = []
     if not dry_run:
         try:
-            executor.apply(plan, root)
+            events = executor.apply(plan, root)
         except Exception as exc:
             raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
 
@@ -504,6 +511,8 @@ def org(
         state.files[record.path] = record
 
     repository.save(root, state)
+    if events:
+        repository.append_history(root, events)
     console.print(f"[green]Persisted state for {len(result.processed)} files.[/green]")
 
     log_path = state_dir / "dorgy.log"
