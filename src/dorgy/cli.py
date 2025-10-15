@@ -426,6 +426,8 @@ def org(
             )
         if plan.renames:
             console.print(f"[cyan]{len(plan.renames)} rename operations planned/applied.[/cyan]")
+        if plan.moves:
+            console.print(f"[cyan]{len(plan.moves)} move operations planned/applied.[/cyan]")
         if prompt:
             console.print(
                 "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
@@ -709,16 +711,38 @@ def mv(**_: object) -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-def undo(**_: object) -> None:
-    """Restore a collection to its original structure.
+@click.option("--dry-run", is_flag=True, help="Preview rollback without applying it.")
+def undo(path: str, dry_run: bool) -> None:
+    """Rollback the last organization plan applied to PATH."""
 
-    Args:
-        _: Placeholder for Click-injected keyword arguments.
+    root = Path(path).expanduser().resolve()
+    repository = StateRepository()
+    executor = OperationExecutor()
 
-    Returns:
-        None: This function is invoked for its side effects.
-    """
-    _not_implemented("dorgy undo")
+    try:
+        state = repository.load(root)
+    except MissingStateError as exc:
+        raise click.ClickException(f"No organization state found for {root}: {exc}") from exc
+
+    if dry_run:
+        console.print("[yellow]Dry run: organization rollback simulated.[/yellow]")
+        plan = executor._load_plan(root)  # type: ignore[attr-defined]
+        if plan is None:
+            console.print("[yellow]No plan available to roll back.[/yellow]")
+        else:
+            console.print(
+                "[yellow]Plan contains "
+                f"{len(plan.renames)} renames and {len(plan.moves)} moves.[/yellow]"
+            )
+        return
+
+    try:
+        executor.rollback(root)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    repository.save(root, state)
+    console.print(f"[green]Rolled back last plan for {root}.[/green]")
 
 
 def main() -> None:
