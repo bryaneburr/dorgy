@@ -288,8 +288,8 @@ The project will progress through the following phases. Update the status column
 | ------ | ----- | ---------------- |
 | [x] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline + config/state scaffolding |
 | [x] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers – config CLI + state repository persistence |
-| [~] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
-| [ ] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
+| [x] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
+| [~] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
 | [ ] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
@@ -357,6 +357,28 @@ The project will progress through the following phases. Update the status column
 ### Progress Summary
 - Classification engine provides a heuristic fallback by default with optional DSPy integration (`DORGY_ENABLE_DSPY=1`) and JSON-backed caching.
 - CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
+
+## Phase 4 – Organization Engine Plan
+
+### Goals
+- Transform classification decisions into concrete organization actions (renames, moves, metadata updates) governed by `organization` settings.
+- Handle conflict resolution strategies (append number/timestamp/skip) and maintain undo metadata for every applied change.
+- Support dry-run and JSON previews that surface the proposed operations before execution.
+- Update `.dorgy` state/logging with the applied actions to power undo/redo workflows.
+- Integrate the organization engine with CLI commands (`org`, `watch`, `mv`, `undo`) so users can inspect and apply plans confidently.
+
+### Implementation Strategy
+1. Implement an `Organizer` planner that consumes descriptors + decisions to build an ordered operation plan.
+2. Execute the plan with transactional safeguards (staging directories, rollback and resume capabilities).
+3. Extend CLI output to show planned/applicable operations, supporting dry-run/JSON parity and `--output` relocation modes.
+4. Persist operation history (pre/post paths, timestamps, conflicts resolved) in state/log files alongside classification metadata.
+5. Hook into undo/rollback (`dorgy undo`) by referencing the plan history and original structure snapshots.
+
+### Deliverables
+- `dorgy.organization` package with planner, executor, and configuration adapters.
+- Comprehensive tests covering conflict resolution, rename/move execution, dry-run previews, and rollback safety nets.
+- CLI integration tests validating state/log updates, rename toggles, and undo functionality.
+- Documentation updates (README, AGENTS, SPEC) describing the organization engine workflow.
 
 ### Goals
 - Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.
