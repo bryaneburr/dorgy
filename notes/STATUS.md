@@ -19,4 +19,4 @@
 - Implemented configuration persistence/resolution (file/env/CLI precedence), wired `dorgy config view|set|edit`, and added unit/CLI tests.
 - Documented configuration usage in README/AGENTS to guide future contributors.
 - Delivered state repository persistence helpers (`state.json`, `orig.json`, review/quarantine folders) with tests covering round-trips and error handling.
-- Upcoming focus: integrate configuration/state usage into future commands and prepare ingestion pipeline scaffolding.
+- Phase 1 complete; SPEC table updated accordingly. Upcoming focus: integrate configuration/state usage into future commands and begin Phase 2 ingestion scaffolding.
