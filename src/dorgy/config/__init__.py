@@ -5,12 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from .models import DorgyConfig
+from .resolver import flatten_for_env, resolve_with_precedence
 
 DEFAULT_CONFIG_PATH = Path("~/.dorgy/config.yaml")
 
 
 class ConfigManager:
-    """Placeholder manager responsible for loading and saving configuration."""
+    """Placeholder manager responsible for loading and saving configuration.
+
+    Phase 1 will wire this manager to `resolve_with_precedence` so the
+    effective configuration is derived from defaults, file overrides,
+    environment variables, and CLI-provided options in that order.
+    """
 
     def __init__(self, config_path: Path | None = None) -> None:
         self._config_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
@@ -33,4 +39,10 @@ class ConfigManager:
         raise NotImplementedError("ConfigManager.ensure_exists will be implemented in Phase 1.")
 
 
-__all__ = ["ConfigManager", "DEFAULT_CONFIG_PATH", "DorgyConfig"]
+__all__ = [
+    "ConfigManager",
+    "DEFAULT_CONFIG_PATH",
+    "DorgyConfig",
+    "resolve_with_precedence",
+    "flatten_for_env",
+]

@@ -10,4 +10,5 @@
 - Standardized local Python to 3.11 by updating `.python-version`, so uv commands automatically use the compatible interpreter.
 - Established pre-commit configuration (Ruff lint/format/imports, MyPy, `uv run pytest`), added tool configs in `pyproject.toml`, and documented workflow updates in README/AGENTS.
 - Added scaffolding for configuration and state management modules (placeholders plus Pydantic models) with accompanying tests to keep future implementations guided.
+- Documented Phase 1 scope and added resolver placeholders outlining precedence (CLI > env > file > defaults) along with tests asserting the current NotImplemented status.
 - Next actions: outline CLI command behaviors for Phase 1, design the config load/save workflow ahead of implementation, and capture ingestion pipeline assumptions in SPEC.md.
