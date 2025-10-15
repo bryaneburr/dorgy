@@ -16,6 +16,10 @@ uv run dorgy --help
 
 # Run lint/format/tests via hooks
 uv run pre-commit run --all-files
+
+# View or modify configuration
+uv run dorgy config view
+uv run dorgy config set llm.temperature --value 0.25
 ```
 
 ### Project Conventions
@@ -25,3 +29,9 @@ uv run pre-commit run --all-files
 - Use `uv run dorgy <command>` while the CLI lives in this repository; entry points log a placeholder message until later phases implement functionality.
 
 Refer to `AGENTS.md` for automation guidelines and team coordination expectations.
+
+### Configuration Notes
+
+- Configuration lives at `~/.dorgy/config.yaml`. Run `uv run dorgy config view` to inspect the effective settings (including environment overrides).
+- Update individual values via `uv run dorgy config set section.key --value <value>` or edit the entire file with `uv run dorgy config edit` (validation runs before saving).
+- Environment variables follow the `DORGY__SECTION__KEY` naming convention and take precedence over file values; CLI-provided overrides always win for a given invocation.
