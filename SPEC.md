@@ -354,6 +354,10 @@ The project will progress through the following phases. Update the status column
 - Extend CLI (`org`, `watch`, `search`, `mv`) to consume the classification pipeline, including prompt support and JSON/dry-run parity.
 - Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
 
+### Progress Summary
+- Classification scaffolding with heuristic fallback is in place; DSPy program wiring remains.
+- CLI `org` command now runs classification, records categories/tags/confidence, and honours `organization.rename_files` to control renaming.
+
 ### Goals
 - Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.
 - Respect configuration toggles for recursion, hidden files, symlink handling, maximum sizes, and locked/corrupted file policies.

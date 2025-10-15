@@ -4,3 +4,4 @@
 - All new classification inputs should be wrapped in `ClassificationRequest` (descriptor + prompt + collection context) to keep interfaces consistent.
 - Update `ClassificationDecision` / `ClassificationBatch` when adding new outputs (e.g., audit trails) and ensure downstream state persistence handles them.
 - Unit tests for classification scaffolding live under `tests/`; mock DSPy interactions to keep the suite hermetic.
+- The heuristic fallback should remain deterministic; adjust `tests/test_classification_engine.py` if logic changes.
