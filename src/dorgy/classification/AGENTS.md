@@ -1,0 +1,6 @@
+# CLASSIFICATION COORDINATION NOTES
+
+- `ClassificationEngine` encapsulates DSPy programs; keep DSPy imports isolated here so the rest of the codebase can function without the dependency.
+- All new classification inputs should be wrapped in `ClassificationRequest` (descriptor + prompt + collection context) to keep interfaces consistent.
+- Update `ClassificationDecision` / `ClassificationBatch` when adding new outputs (e.g., audit trails) and ensure downstream state persistence handles them.
+- Unit tests for classification scaffolding live under `tests/`; mock DSPy interactions to keep the suite hermetic.
