@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+import difflib
+from typing import Any
+
 import click
+import yaml
 from rich.console import Console
+from rich.syntax import Syntax
+
+from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
 
 console = Console()
 
@@ -14,6 +21,23 @@ def _not_implemented(command: str) -> None:
         f"[yellow]`{command}` is not implemented yet. "
         "Track progress in SPEC.md and notes/STATUS.md.[/yellow]"
     )
+
+
+def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
+    """Assign a nested value within a dictionary given a dotted path."""
+
+    node = target
+    for segment in path[:-1]:
+        existing = node.get(segment)
+        if existing is None:
+            existing = {}
+            node[segment] = existing
+        elif not isinstance(existing, dict):
+            raise ConfigError(
+                f"Cannot assign into '{segment}' because it is not a mapping in the config file."
+            )
+        node = existing
+    node[path[-1]] = value
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -57,23 +81,104 @@ def config() -> None:
 
 
 @config.command("view")
-def config_view() -> None:
+@click.option("--no-env", is_flag=True, help="Ignore environment overrides when displaying output.")
+def config_view(no_env: bool) -> None:
     """Display effective configuration."""
-    _not_implemented("dorgy config view")
+    manager = ConfigManager()
+    try:
+        manager.ensure_exists()
+        config = manager.load(include_env=not no_env)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    yaml_text = yaml.safe_dump(config.model_dump(mode="python"), sort_keys=False)
+    console.print(Syntax(yaml_text, "yaml", word_wrap=True))
 
 
 @config.command("set")
 @click.argument("key")
 @click.option("--value", required=True, help="Value to assign to KEY.")
-def config_set(**_: object) -> None:
+def config_set(key: str, value: str) -> None:
     """Persist a configuration value."""
-    _not_implemented("dorgy config set")
+    manager = ConfigManager()
+    manager.ensure_exists()
+
+    before = manager.read_text().splitlines()
+    segments = [segment.strip() for segment in key.split(".") if segment.strip()]
+    if not segments:
+        raise click.ClickException("KEY must specify a dotted path such as 'llm.temperature'.")
+
+    try:
+        parsed_value = yaml.safe_load(value)
+    except yaml.YAMLError as exc:
+        raise click.ClickException(f"Unable to parse value: {exc}") from exc
+
+    file_data = manager.load_file_overrides()
+
+    try:
+        _assign_nested(file_data, segments, parsed_value)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    try:
+        resolve_with_precedence(defaults=DorgyConfig(), file_overrides=file_data)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    manager.save(file_data)
+    after = manager.read_text().splitlines()
+
+    diff = list(
+        difflib.unified_diff(
+            before,
+            after,
+            fromfile="config.yaml (before)",
+            tofile="config.yaml (after)",
+            lineterm="",
+        )
+    )
+
+    if diff:
+        console.print(Syntax("\n".join(diff), "diff", word_wrap=False))
+    else:
+        console.print("[yellow]No changes applied; value already up to date.[/yellow]")
+        return
+
+    console.print(f"[green]Updated {'.'.join(segments)}.[/green]")
 
 
 @config.command("edit")
 def config_edit() -> None:
     """Open configuration for interactive editing."""
-    _not_implemented("dorgy config edit")
+    manager = ConfigManager()
+    manager.ensure_exists()
+
+    original = manager.read_text()
+    edited = click.edit(original, extension=".yaml")
+
+    if edited is None:
+        console.print("[yellow]Edit cancelled; no changes applied.[/yellow]")
+        return
+
+    if edited == original:
+        console.print("[yellow]No changes detected.[/yellow]")
+        return
+
+    try:
+        parsed = yaml.safe_load(edited) or {}
+    except yaml.YAMLError as exc:
+        raise click.ClickException(f"Invalid YAML: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise click.ClickException("Configuration file must contain a top-level mapping.")
+
+    try:
+        resolve_with_precedence(defaults=DorgyConfig(), file_overrides=parsed)
+    except ConfigError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    manager.save(parsed)
+    console.print("[green]Configuration updated successfully.[/green]")
 
 
 @cli.command()

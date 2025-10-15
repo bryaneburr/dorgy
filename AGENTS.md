@@ -13,3 +13,4 @@
 - Use feature branches named `feature/<phase-or-scope>` and keep them in sync with pre-commit hooks (`uv run pre-commit run --all-files`) before opening PRs.
 - Surface any new automation entry points or third-party integrations added during a phase in this file alongside module-specific AGENTS documents.
 - Pre-commit stack currently runs Ruff (lint/format/imports), MyPy, and `uv run pytest`; install with `uv run pre-commit install` and keep hooks up to date via `uv run pre-commit autoupdate` when upgrading tooling.
+- Configuration CLI (`dorgy config view|set|edit`) is live; ensure features that depend on settings document their expected keys and defaults in SPEC.md and validation logic.

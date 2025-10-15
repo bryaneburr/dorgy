@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class LLMSettings(BaseModel):
+class DorgyBaseModel(BaseModel):
+    """Shared configuration for Dorgy Pydantic models."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class LLMSettings(DorgyBaseModel):
     """LLM configuration stub; values to be refined in Phase 1."""
 
     provider: str = "local"
@@ -17,7 +23,7 @@ class LLMSettings(BaseModel):
     api_key: Optional[str] = None
 
 
-class ProcessingOptions(BaseModel):
+class ProcessingOptions(DorgyBaseModel):
     """Placeholder processing options matching high-level SPEC expectations."""
 
     use_vision_models: bool = False
@@ -28,7 +34,7 @@ class ProcessingOptions(BaseModel):
     sample_size_mb: int = 10
 
 
-class OrganizationOptions(BaseModel):
+class OrganizationOptions(DorgyBaseModel):
     """Placeholder organization settings."""
 
     conflict_resolution: str = Field(default="append_number")
@@ -39,18 +45,18 @@ class OrganizationOptions(BaseModel):
     preserve_extended_attributes: bool = True
 
 
-class AmbiguitySettings(BaseModel):
+class AmbiguitySettings(DorgyBaseModel):
     confidence_threshold: float = 0.8
     max_auto_categories: int = 3
 
 
-class LoggingSettings(BaseModel):
+class LoggingSettings(DorgyBaseModel):
     level: str = "WARNING"
     max_size_mb: int = 100
     backup_count: int = 5
 
 
-class DorgyConfig(BaseModel):
+class DorgyConfig(DorgyBaseModel):
     """Top-level configuration model stub."""
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
@@ -62,6 +68,7 @@ class DorgyConfig(BaseModel):
 
 
 __all__ = [
+    "DorgyBaseModel",
     "LLMSettings",
     "ProcessingOptions",
     "OrganizationOptions",
