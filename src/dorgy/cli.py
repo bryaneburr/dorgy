@@ -26,7 +26,11 @@ def cli() -> None:
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 @click.option("-r", "--recursive", is_flag=True, help="Include all subdirectories.")
 @click.option("--prompt", type=str, help="Provide extra instructions for organization.")
-@click.option("--output", type=click.Path(file_okay=False, path_type=str), help="Directory for organized files.")
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=str),
+    help="Directory for organized files.",
+)
 @click.option("--dry-run", is_flag=True, help="Preview changes without modifying files.")
 @click.option("--json", "json_output", is_flag=True, help="Emit JSON describing proposed changes.")
 def org(**_: object) -> None:
@@ -37,7 +41,11 @@ def org(**_: object) -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 @click.option("-r", "--recursive", is_flag=True, help="Watch subdirectories too.")
-@click.option("--output", type=click.Path(file_okay=False, path_type=str), help="Directory for organized files.")
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, path_type=str),
+    help="Directory for organized files.",
+)
 def watch(**_: object) -> None:
     """Continuously organize new files within PATH."""
     _not_implemented("dorgy watch")

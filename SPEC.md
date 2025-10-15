@@ -286,7 +286,7 @@ The project will progress through the following phases. Update the status column
 
 | Status | Phase | Scope Highlights |
 | ------ | ----- | ---------------- |
-| [~] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline |
+| [~] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline + config/state scaffolding |
 | [ ] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers |
 | [ ] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
 | [ ] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
