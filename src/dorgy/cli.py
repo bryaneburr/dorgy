@@ -16,6 +16,7 @@ from rich.table import Table
 
 from dorgy.classification import (
     ClassificationBatch,
+    ClassificationCache,
     ClassificationDecision,
     ClassificationEngine,
     ClassificationRequest,
@@ -132,6 +133,7 @@ def _run_classification(
     root: Path,
     dry_run: bool,
     config: DorgyConfig,
+    cache: Optional[ClassificationCache],
 ) -> ClassificationBatch:
     """Run the classification engine with graceful degradation.
 
@@ -141,6 +143,7 @@ def _run_classification(
         root: Collection root path.
         dry_run: Indicates whether we are in dry-run mode.
         config: Loaded configuration object.
+        cache: Optional cache for reusing classification results.
 
     Returns:
         ClassificationBatch: Decisions and errors from the classification step.
@@ -150,23 +153,45 @@ def _run_classification(
     if not descriptors:
         return ClassificationBatch()
 
-    requests = [
-        ClassificationRequest(
-            descriptor=descriptor,
-            prompt=prompt,
-            collection_root=root,
-        )
-        for descriptor in descriptors
-    ]
+    if cache is not None:
+        cache.load()
 
-    try:
+    decisions: list[Optional[ClassificationDecision]] = [None] * len(descriptors)
+    errors: list[str] = []
+    missing_requests: list[ClassificationRequest] = []
+    missing_indices: list[int] = []
+    missing_keys: list[Optional[str]] = []
+
+    for index, descriptor in enumerate(descriptors):
+        key = _decision_key(descriptor, root)
+        cached = cache.get(key) if cache is not None and key is not None else None
+        if cached is not None:
+            decisions[index] = cached
+        else:
+            missing_indices.append(index)
+            missing_keys.append(key)
+            missing_requests.append(
+                ClassificationRequest(
+                    descriptor=descriptor,
+                    prompt=prompt,
+                    collection_root=root,
+                )
+            )
+
+    if missing_requests:
         engine = ClassificationEngine()
-    except RuntimeError as exc:
-        console.print(f"[yellow]Classification disabled: {exc}[/yellow]")
-        return ClassificationBatch(errors=[str(exc)])
+        batch = engine.classify(missing_requests)
+        errors.extend(batch.errors)
+        for idx, decision, key in zip(missing_indices, batch.decisions, missing_keys, strict=False):
+            if decision is not None:
+                decisions[idx] = decision
+                if not dry_run and cache is not None and key is not None:
+                    cache.set(key, decision)
 
-    batch = engine.classify(requests)
-    return batch
+    if cache is not None and not dry_run:
+        cache.save()
+
+    return ClassificationBatch(decisions=decisions, errors=errors)
 
 
 def _zip_decisions(
@@ -184,6 +209,7 @@ def _zip_decisions(
     """
 
     decisions = list(batch.decisions)
+    descriptors = list(descriptors)
     for index, descriptor in enumerate(descriptors):
         decision = decisions[index] if index < len(decisions) else None
         yield decision, descriptor
@@ -196,6 +222,14 @@ def _relative_to_collection(path: Path, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
+
+
+def _decision_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
+    """Compute a stable cache key for a descriptor."""
+
+    if descriptor.hash:
+        return descriptor.hash
+    return _relative_to_collection(descriptor.path, root)
 
 
 def _apply_rename(path: Path, suggestion: str) -> Path:
@@ -285,6 +319,7 @@ def org(
     )
     state_dir = Path(path).expanduser().resolve() / ".dorgy"
     staging_dir = None if dry_run else state_dir / "staging"
+    classification_cache = ClassificationCache(state_dir / "classifications.json")
 
     pipeline = IngestionPipeline(
         scanner=scanner,
@@ -297,7 +332,14 @@ def org(
     )
 
     result = pipeline.run([root])
-    classification_batch = _run_classification(result.processed, prompt, root, dry_run, config)
+    classification_batch = _run_classification(
+        result.processed,
+        prompt,
+        root,
+        dry_run,
+        config,
+        classification_cache,
+    )
 
     if json_output:
         payload = []
@@ -343,7 +385,9 @@ def org(
             )
         if classification_batch.decisions:
             review_count = sum(
-                1 for decision in classification_batch.decisions if decision.needs_review
+                1
+                for decision in classification_batch.decisions
+                if decision is not None and decision.needs_review
             )
             console.print(
                 f"[green]Classification completed ({len(classification_batch.decisions)} files, "
@@ -404,6 +448,7 @@ def org(
             and decision.rename_suggestion
         ):
             descriptor.path = _apply_rename(descriptor.path, decision.rename_suggestion)
+            descriptor.display_name = descriptor.path.name
             record.path = _relative_to_collection(descriptor.path, root)
 
         state.files.pop(old_relative, None)

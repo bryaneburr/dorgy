@@ -75,6 +75,7 @@ class ClassificationEngine:
                 batch.decisions.append(decision)
             except Exception as exc:  # pragma: no cover - defensive safeguard
                 batch.errors.append(f"{request.descriptor.path}: {exc}")
+                batch.decisions.append(None)
         return batch
 
     def _build_program(self):

@@ -54,9 +54,9 @@ class ClassificationBatch(BaseModel):
     """Aggregate classification outcome for a batch run.
 
     Attributes:
-        decisions: Successful classification decisions.
+        decisions: Classification decisions aligned with requests (``None`` when an error occurs).
         errors: Human-readable error messages for failed items.
     """
 
-    decisions: List[ClassificationDecision] = Field(default_factory=list)
+    decisions: List[Optional[ClassificationDecision]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
