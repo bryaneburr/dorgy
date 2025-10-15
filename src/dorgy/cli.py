@@ -25,7 +25,11 @@ console = Console()
 
 
 def _not_implemented(command: str) -> None:
-    """Emit a standard placeholder message until the command is wired up."""
+    """Emit a placeholder message for incomplete CLI commands.
+
+    Args:
+        command: Name of the command to mention in the status message.
+    """
     console.print(
         f"[yellow]`{command}` is not implemented yet. "
         "Track progress in SPEC.md and notes/STATUS.md.[/yellow]"
@@ -33,7 +37,16 @@ def _not_implemented(command: str) -> None:
 
 
 def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
-    """Assign a nested value within a dictionary given a dotted path."""
+    """Assign a nested value within a dictionary for a dotted path.
+
+    Args:
+        target: Mapping to mutate in-place.
+        path: Sequence of keys representing the nested location.
+        value: Value to assign at the nested location.
+
+    Raises:
+        ConfigError: If a non-mapping value is encountered along the path.
+    """
 
     node = target
     for segment in path[:-1]:
@@ -50,7 +63,15 @@ def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
 
 
 def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
-    """Convert an ingestion descriptor into a state record."""
+    """Convert an ingestion descriptor into a persisted state record.
+
+    Args:
+        descriptor: Descriptor produced by the ingestion pipeline.
+        root: Root directory for the collection.
+
+    Returns:
+        FileRecord: The state record ready to be saved.
+    """
 
     try:
         relative = descriptor.path.relative_to(root)
@@ -89,7 +110,11 @@ def _descriptor_to_record(descriptor: FileDescriptor, root: Path) -> FileRecord:
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="dorgy")
 def cli() -> None:
-    """Dorgy automatically organizes your files using AI-assisted workflows."""
+    """Dorgy automatically organizes your files using AI-assisted workflows.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
 
 
 @cli.command()
@@ -111,7 +136,19 @@ def org(
     dry_run: bool,
     json_output: bool,
 ) -> None:
-    """Organize files within PATH."""
+    """Organize files rooted at PATH using the configured ingestion pipeline.
+
+    Args:
+        path: Root directory to organize.
+        recursive: Whether to include subdirectories during scanning.
+        prompt: Additional natural-language guidance for the workflow.
+        output: Destination directory for organized files (future feature).
+        dry_run: If True, skip making filesystem mutations.
+        json_output: If True, emit JSON describing proposed changes.
+
+    Raises:
+        click.ClickException: If configuration loading or validation fails.
+    """
     manager = ConfigManager()
     try:
         manager.ensure_exists()
@@ -257,19 +294,37 @@ def org(
     help="Directory for organized files.",
 )
 def watch(**_: object) -> None:
-    """Continuously organize new files within PATH."""
+    """Continuously organize new files within PATH.
+
+    Args:
+        _: Placeholder for Click-injected keyword arguments.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
     _not_implemented("dorgy watch")
 
 
 @cli.group()
 def config() -> None:
-    """Manage Dorgy configuration."""
+    """Manage Dorgy configuration files and overrides.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
 
 
 @config.command("view")
 @click.option("--no-env", is_flag=True, help="Ignore environment overrides when displaying output.")
 def config_view(no_env: bool) -> None:
-    """Display effective configuration."""
+    """Display the effective configuration after applying precedence rules.
+
+    Args:
+        no_env: If True, ignore environment-derived overrides.
+
+    Raises:
+        click.ClickException: If configuration cannot be loaded.
+    """
     manager = ConfigManager()
     try:
         manager.ensure_exists()
@@ -285,7 +340,15 @@ def config_view(no_env: bool) -> None:
 @click.argument("key")
 @click.option("--value", required=True, help="Value to assign to KEY.")
 def config_set(key: str, value: str) -> None:
-    """Persist a configuration value."""
+    """Persist a configuration value expressed as a dotted KEY.
+
+    Args:
+        key: Dotted path describing the configuration field to update.
+        value: YAML-literal value to write into the configuration file.
+
+    Raises:
+        click.ClickException: If parsing, assignment, or validation fails.
+    """
     manager = ConfigManager()
     manager.ensure_exists()
 
@@ -335,7 +398,11 @@ def config_set(key: str, value: str) -> None:
 
 @config.command("edit")
 def config_edit() -> None:
-    """Open configuration for interactive editing."""
+    """Open the configuration file in an interactive editor session.
+
+    Raises:
+        click.ClickException: If edited content is invalid or cannot be saved.
+    """
     manager = ConfigManager()
     manager.ensure_exists()
 
@@ -373,7 +440,14 @@ def config_edit() -> None:
 @click.option("--tags", type=str, help="Comma-separated tag filters.")
 @click.option("--before", type=str, help="Return results created before this date.")
 def search(**_: object) -> None:
-    """Search within an organized collection."""
+    """Search within an organized collection.
+
+    Args:
+        _: Placeholder for Click-injected keyword arguments.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
     _not_implemented("dorgy search")
 
 
@@ -381,19 +455,37 @@ def search(**_: object) -> None:
 @click.argument("source", type=click.Path(exists=True, path_type=str))
 @click.argument("destination", type=click.Path(path_type=str))
 def mv(**_: object) -> None:
-    """Move a file or directory within an organized collection."""
+    """Move a file or directory within an organized collection.
+
+    Args:
+        _: Placeholder for Click-injected keyword arguments.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
     _not_implemented("dorgy mv")
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 def undo(**_: object) -> None:
-    """Restore a collection to its original structure."""
+    """Restore a collection to its original structure.
+
+    Args:
+        _: Placeholder for Click-injected keyword arguments.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
     _not_implemented("dorgy undo")
 
 
 def main() -> None:
-    """Entry point used by console scripts."""
+    """Invoke the Click CLI as the console script entry point.
+
+    Returns:
+        None: This function is invoked for its side effects.
+    """
     cli()
 
 

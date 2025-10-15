@@ -1,4 +1,4 @@
-"""State data models for organized collections (Phase 0 scaffolding)."""
+"""State data models for organized collections."""
 
 from __future__ import annotations
 
@@ -9,7 +9,16 @@ from pydantic import BaseModel, Field
 
 
 class FileRecord(BaseModel):
-    """Metadata describing a file in an organized collection."""
+    """Metadata describing a file in an organized collection.
+
+    Attributes:
+        path: Relative path to the file within the collection root.
+        hash: Optional hash representing the file contents.
+        tags: Tags inferred during ingestion.
+        categories: Explicit categories associated with the file.
+        confidence: Confidence score from classification.
+        last_modified: Timestamp for the last modification.
+    """
 
     path: str
     hash: Optional[str] = None
@@ -20,7 +29,14 @@ class FileRecord(BaseModel):
 
 
 class CollectionState(BaseModel):
-    """Aggregate metadata for an organized directory."""
+    """Aggregate metadata for an organized directory.
+
+    Attributes:
+        root: Absolute path to the tracked directory.
+        files: Mapping of relative paths to file records.
+        created_at: Timestamp capturing when the collection was first tracked.
+        updated_at: Timestamp capturing the latest mutation time.
+    """
 
     root: str
     files: Dict[str, FileRecord] = Field(default_factory=dict)

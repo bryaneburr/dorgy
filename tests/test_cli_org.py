@@ -14,12 +14,25 @@ from dorgy.ingestion.extractors import MetadataExtractor
 
 
 def _env_with_home(tmp_path: Path) -> dict[str, str]:
+    """Return environment variables pointing HOME to a temp directory.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+
+    Returns:
+        dict[str, str]: Environment mapping with HOME set.
+    """
     env = dict(os.environ)
     env["HOME"] = str((tmp_path / "home"))
     return env
 
 
 def test_cli_org_persists_state(tmp_path: Path) -> None:
+    """Ensure `dorgy org` persists state data on success.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     root = tmp_path / "data"
     root.mkdir()
     (root / "doc.txt").write_text("hello world", encoding="utf-8")
@@ -38,6 +51,11 @@ def test_cli_org_persists_state(tmp_path: Path) -> None:
 
 
 def test_cli_org_dry_run(tmp_path: Path) -> None:
+    """Verify dry-run mode avoids creating state directories.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     root = tmp_path / "dry"
     root.mkdir()
     (root / "note.txt").write_text("content", encoding="utf-8")
@@ -53,6 +71,12 @@ def test_cli_org_dry_run(tmp_path: Path) -> None:
 
 
 def test_cli_org_quarantine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure corrupted files are quarantined based on configuration.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture for patching modules.
+    """
     root = tmp_path / "broken"
     root.mkdir()
     bad_file = root / "bad.txt"
@@ -67,10 +91,14 @@ def test_cli_org_quarantine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     class FailingExtractor(MetadataExtractor):
+        """Extractor stub that raises from extract."""
+
         def extract(self, path: Path, mime_type: str):  # type: ignore[override]
+            """Raise a ValueError to trigger quarantine behavior."""
             raise ValueError("broken")
 
         def preview(self, path: Path, mime_type: str):  # type: ignore[override]
+            """Return None since no preview is generated."""
             return None
 
     monkeypatch.setattr("dorgy.cli.MetadataExtractor", FailingExtractor)

@@ -20,7 +20,16 @@ class MetadataExtractor:
     def extract(
         self, path: Path, mime_type: str, sample_limit: int | None = None
     ) -> Dict[str, str]:
-        """Return metadata key/value pairs for the file."""
+        """Return metadata key/value pairs for the file.
+
+        Args:
+            path: Path to the file being processed.
+            mime_type: MIME type detected for the file.
+            sample_limit: Optional limit on the number of bytes to sample.
+
+        Returns:
+            Dict[str, str]: Mapping of metadata field names to values.
+        """
         try:
             stat = path.stat()
         except OSError as exc:  # pragma: no cover - file disappeared
@@ -72,7 +81,16 @@ class MetadataExtractor:
         return metadata
 
     def preview(self, path: Path, mime_type: str, sample_limit: int | None = None) -> Optional[str]:
-        """Return a short textual preview of the file content."""
+        """Return a short textual preview of the file content.
+
+        Args:
+            path: Path to the file being processed.
+            mime_type: MIME type detected for the file.
+            sample_limit: Optional limit on the number of bytes to sample.
+
+        Returns:
+            Optional[str]: Preview text when available, otherwise None.
+        """
         if mime_type.startswith("text") or mime_type in {"application/json", "application/xml"}:
             limit = min(sample_limit, 512) if sample_limit else 512
             try:

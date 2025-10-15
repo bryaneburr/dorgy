@@ -10,6 +10,14 @@ from .models import PendingFile
 
 
 def _is_hidden(path: Path) -> bool:
+    """Return True if the provided path contains hidden components.
+
+    Args:
+        path: Path to evaluate.
+
+    Returns:
+        bool: True if any segment starts with a dot (excluding '.' and '..').
+    """
     return any(part.startswith(".") for part in path.parts if part not in (".", ".."))
 
 
@@ -24,13 +32,28 @@ class DirectoryScanner:
         follow_symlinks: bool,
         max_size_bytes: int | None,
     ) -> None:
+        """Initialize the directory scanner.
+
+        Args:
+            recursive: Whether to traverse into subdirectories.
+            include_hidden: Whether to include hidden files.
+            follow_symlinks: Whether to follow symbolic links.
+            max_size_bytes: Maximum file size to include; None for unlimited.
+        """
         self.recursive = recursive
         self.include_hidden = include_hidden
         self.follow_symlinks = follow_symlinks
         self.max_size_bytes = max_size_bytes
 
     def scan(self, root: Path) -> Iterator[PendingFile]:
-        """Yield files discovered under root respecting configured filters."""
+        """Yield files discovered under root respecting configured filters.
+
+        Args:
+            root: Root directory to scan.
+
+        Yields:
+            PendingFile: Metadata for each candidate file discovered.
+        """
         root = root.expanduser().resolve()
         if not root.exists():
             return
@@ -73,7 +96,14 @@ class DirectoryScanner:
             )
 
     def _iter_paths(self, root: Path) -> Iterable[Path]:
-        """Internal helper to iterate candidate paths."""
+        """Return an iterable of candidate paths within a root directory.
+
+        Args:
+            root: Root directory or file to inspect.
+
+        Returns:
+            Iterable[Path]: Generator over candidate paths.
+        """
         if root.is_file():
             yield root
             return

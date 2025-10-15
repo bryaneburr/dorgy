@@ -1,4 +1,4 @@
-"""Custom exceptions for configuration management."""
+"""Exception types raised by the configuration subsystem."""
 
 
 class ConfigError(Exception):

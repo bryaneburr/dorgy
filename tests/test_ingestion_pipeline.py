@@ -13,6 +13,11 @@ from dorgy.ingestion.models import PendingFile
 
 
 def test_directory_scanner_filters(tmp_path: Path) -> None:
+    """Ensure directory scanner respects hidden, size, and recursion filters.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     visible = tmp_path / "visible.txt"
     visible.write_text("hello", encoding="utf-8")
 
@@ -39,6 +44,11 @@ def test_directory_scanner_filters(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
+    """Verify pipeline produces descriptors with metadata for mixed inputs.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     file_path = tmp_path / "note.txt"
     file_path.write_text("first line\nsecond", encoding="utf-8")
 
@@ -81,6 +91,11 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
+    """Ensure oversized files are sampled and marked accordingly.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     large_file = tmp_path / "large.txt"
     large_file.write_text("A" * 4096, encoding="utf-8")
 
@@ -107,15 +122,25 @@ def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_quarantines_on_error(tmp_path: Path) -> None:
+    """Ensure pipeline quarantines files when extraction errors occur.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+
     class FailingExtractor(MetadataExtractor):
+        """Extractor stub that raises during metadata extraction."""
+
         def extract(  # type: ignore[override]
             self, path: Path, mime_type: str, sample_limit: int | None = None
         ) -> dict[str, str]:
+            """Raise a ValueError to simulate extraction failure."""
             raise ValueError("boom")
 
         def preview(  # type: ignore[override]
             self, path: Path, mime_type: str, sample_limit: int | None = None
         ) -> str | None:
+            """Return None to indicate no preview is available."""
             return None
 
     file_path = tmp_path / "bad.txt"
@@ -146,6 +171,11 @@ def test_ingestion_pipeline_quarantines_on_error(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
+    """Ensure locked files are skipped when policy requests skip.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     locked_file = tmp_path / "locked.txt"
     locked_file.write_text("content", encoding="utf-8")
 
@@ -156,7 +186,10 @@ def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
     )
 
     class LockedScanner:
+        """Scanner stub that yields a single pending file."""
+
         def scan(self, root: Path):  # type: ignore[override]
+            """Yield the preconfigured pending file."""
             yield pending
 
     processing = ProcessingOptions(
@@ -179,6 +212,11 @@ def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
 
 
 def test_ingestion_pipeline_copies_locked_files(tmp_path: Path) -> None:
+    """Ensure locked files are copied to staging when policy requires it.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
     locked_file = tmp_path / "locked.txt"
     locked_file.write_text("content", encoding="utf-8")
 
@@ -189,7 +227,10 @@ def test_ingestion_pipeline_copies_locked_files(tmp_path: Path) -> None:
     )
 
     class LockedScanner:
+        """Scanner stub that yields a single pending file."""
+
         def scan(self, root: Path):  # type: ignore[override]
+            """Yield the preconfigured pending file."""
             yield pending
 
     staging_dir = tmp_path / "staging"

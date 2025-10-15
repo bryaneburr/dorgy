@@ -28,6 +28,17 @@ class IngestionPipeline:
         staging_dir: Path | None = None,
         allow_writes: bool = True,
     ) -> None:
+        """Initialize the ingestion pipeline with collaborator instances.
+
+        Args:
+            scanner: Directory scanner that yields candidate files.
+            detector: MIME-type detector for discovered files.
+            hasher: Hash computer for deduplication support.
+            extractor: Metadata extractor for file content.
+            processing: Processing configuration options.
+            staging_dir: Optional directory for temporary copies.
+            allow_writes: Whether the pipeline is permitted to write to disk.
+        """
         self.scanner = scanner
         self.detector = detector
         self.hasher = hasher
@@ -37,7 +48,14 @@ class IngestionPipeline:
         self.allow_writes = allow_writes
 
     def run(self, roots: Iterable[Path]) -> IngestionResult:
-        """Process one or more roots and return aggregated results."""
+        """Process one or more roots and return aggregated results.
+
+        Args:
+            roots: Iterable of directory roots to ingest.
+
+        Returns:
+            IngestionResult: Aggregate of processed descriptors and status.
+        """
         result = IngestionResult()
 
         for root in roots:
@@ -106,6 +124,17 @@ class IngestionPipeline:
         pending: PendingFile,
         result: IngestionResult,
     ) -> Tuple[Path, dict[str, str], bool] | None:
+        """Resolve a locked file according to the configured policy.
+
+        Args:
+            pending: File awaiting processing that is locked.
+            result: Result object collecting pipeline metadata.
+
+        Returns:
+            Tuple[Path, dict[str, str], bool] | None: Path to process, additional metadata,
+            and whether the descriptor still needs review. Returns None if the file
+            should be skipped.
+        """
         action = self.processing.locked_files.action
 
         if action == "skip":
