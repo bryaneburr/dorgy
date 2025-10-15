@@ -398,5 +398,5 @@ The project will progress through the following phases. Update the status column
 - Documentation updates (README/AGENTS) highlighting ingestion pipeline layout and configuration touchpoints.
 
 ### Progress Summary
-- Renames are sanitized with conflict resolution, and move operations place files into category folders derived from classification decisions.
+- Conflict resolution respects `organization.conflict_resolution` (append_number, timestamp, skip), and rename/move operations surface plan notes describing how collisions were handled; moves still place files into category folders derived from classification decisions.
 - Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.

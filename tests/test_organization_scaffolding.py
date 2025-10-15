@@ -1,5 +1,6 @@
 """Tests for organization scaffolding."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dorgy.classification.models import ClassificationDecision
@@ -72,6 +73,62 @@ def test_planner_resolves_conflicts(tmp_path: Path) -> None:
 
     destinations = {rename.destination.name for rename in plan.renames}
     assert destinations == {"report-1.txt", "report-2.txt"}
+
+
+def test_planner_skip_conflict_policy(tmp_path: Path) -> None:
+    original = tmp_path / "doc.txt"
+    original.write_text("content", encoding="utf-8")
+    existing = tmp_path / "report.txt"
+    existing.write_text("existing", encoding="utf-8")
+
+    descriptor = FileDescriptor(
+        path=original,
+        display_name="doc.txt",
+        mime_type="text/plain",
+        hash="1",
+    )
+    decision = ClassificationDecision(primary_category="Docs", rename_suggestion="report")
+
+    planner = OrganizerPlanner()
+    plan = planner.build_plan(
+        [descriptor],
+        [decision],
+        rename_enabled=True,
+        root=tmp_path,
+        conflict_strategy="skip",
+    )
+
+    assert plan.renames == []
+    assert any("skip" in note.lower() for note in plan.notes)
+
+
+def test_planner_timestamp_conflict_policy(tmp_path: Path) -> None:
+    original = tmp_path / "doc.txt"
+    original.write_text("content", encoding="utf-8")
+    existing = tmp_path / "report.txt"
+    existing.write_text("existing", encoding="utf-8")
+
+    descriptor = FileDescriptor(
+        path=original,
+        display_name="doc.txt",
+        mime_type="text/plain",
+        hash="1",
+    )
+    decision = ClassificationDecision(primary_category="Docs", rename_suggestion="report")
+
+    planner = OrganizerPlanner()
+    fixed_timestamp = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    plan = planner.build_plan(
+        [descriptor],
+        [decision],
+        rename_enabled=True,
+        root=tmp_path,
+        conflict_strategy="timestamp",
+        timestamp_provider=lambda: fixed_timestamp,
+    )
+
+    assert plan.renames[0].destination.name == "report-20240101-120000.txt"
+    assert any("timestamp" in note.lower() for note in plan.notes)
 
 
 def test_executor_rollback(tmp_path: Path) -> None:

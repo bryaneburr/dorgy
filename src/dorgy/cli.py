@@ -361,6 +361,7 @@ def org(
         decisions=[decision for decision, _ in paired],
         rename_enabled=config.organization.rename_files,
         root=root,
+        conflict_strategy=config.organization.conflict_resolution,
     )
     rename_map = {operation.source: operation.destination for operation in plan.renames}
     move_map = {operation.source: operation.destination for operation in plan.moves}
@@ -436,6 +437,10 @@ def org(
             console.print(
                 "[yellow]Output path support is coming soon; files stay in place for now.[/yellow]"
             )
+        if plan.notes:
+            console.print("[yellow]Plan notes:[/yellow]")
+            for note in plan.notes:
+                console.print(f"  - {note}")
         combined_errors = [*result.errors, *classification_batch.errors]
         if combined_errors:
             console.print("[red]Errors:[/red]")

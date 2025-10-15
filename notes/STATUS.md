@@ -43,3 +43,9 @@
 - Updated `AGENTS.md` directives to mandate Google-style docstrings for future contributions.
 - Ran `uv run pre-commit run --all-files` to validate formatting, linting, and tests prior to push.
 - Next actions: audit SPEC.md for any docstring-related expectations that should be surfaced in upcoming phases.
+
+## 2025-10-19
+- Extended the organization planner to honour `organization.conflict_resolution` (append_number, timestamp, skip) with timestamp injection for tests and surfaced `plan.notes` through the CLI.
+- Added timestamp/skip collision coverage to `tests/test_organization_scaffolding.py`, updated SPEC and organization AGENTS guidance, and confirmed behaviour via `uv run pytest`.
+- Observed test suite summary: 37 passed, 1 skipped (DSPy optional dependency).
+- Next actions: capture richer operation history artifacts (pre/post path snapshots, timestamps) and assess requirements for watch/mv command integration ahead of Phase 5.

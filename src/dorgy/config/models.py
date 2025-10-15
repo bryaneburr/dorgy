@@ -94,7 +94,9 @@ class OrganizationOptions(DorgyBaseModel):
         rename_files: Whether to automatically rename files based on classification output.
     """
 
-    conflict_resolution: str = Field(default="append_number")
+    conflict_resolution: Literal["append_number", "timestamp", "skip"] = Field(
+        default="append_number"
+    )
     use_dates: bool = True
     date_format: str = "YYYY-MM"
     preserve_language: bool = False
