@@ -34,6 +34,10 @@
 - Implemented heuristic classification fallback, CLI integration (including rename toggle support), state persistence of decisions, and coverage for new behaviours.
 - Added JSON-backed classification cache, confidence-based review routing, and optional DSPy activation via `DORGY_ENABLE_DSPY`.
 
+## 2025-10-18
+- Began Phase 4 organization engine: planner/executor scaffolding, rename conflict resolution, category-based moves, and undo/logging (`last_plan.json`).
+- CLI `org` now previews/applies rename+move operations and logs details to `.dorgy/dorgy.log`.
+
 ## 2025-10-16 (cont.)
 - Replaced all Python module/class/function docstrings with Google-style format across src/ and tests/ to standardize documentation quality.
 - Updated `AGENTS.md` directives to mandate Google-style docstrings for future contributions.

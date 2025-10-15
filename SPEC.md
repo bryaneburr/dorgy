@@ -290,7 +290,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers – config CLI + state repository persistence |
 | [x] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
 | [~] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
-| [ ] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
+| [~] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
@@ -396,3 +396,7 @@ The project will progress through the following phases. Update the status column
 - Interfaces/classes with `NotImplementedError` placeholders for discovery, detection, and extraction behaviors.
 - Tests confirming scaffolding entry points exist and raise `NotImplementedError` where implementation will follow.
 - Documentation updates (README/AGENTS) highlighting ingestion pipeline layout and configuration touchpoints.
+
+### Progress Summary
+- Renames are sanitized with conflict resolution, and move operations place files into category folders derived from classification decisions.
+- Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.
