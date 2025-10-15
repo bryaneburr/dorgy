@@ -355,8 +355,8 @@ The project will progress through the following phases. Update the status column
 - Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
 
 ### Progress Summary
-- Classification scaffolding with heuristic fallback is in place; DSPy program wiring remains.
-- CLI `org` command now runs classification, records categories/tags/confidence, and honours `organization.rename_files` to control renaming.
+- Classification engine provides a heuristic fallback by default with optional DSPy integration (`DORGY_ENABLE_DSPY=1`) and JSON-backed caching.
+- CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
 
 ### Goals
 - Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.

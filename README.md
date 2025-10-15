@@ -37,3 +37,4 @@ Refer to `AGENTS.md` for automation guidelines and team coordination expectation
 - Environment variables follow the `DORGY__SECTION__KEY` naming convention and take precedence over file values; CLI-provided overrides always win for a given invocation.
 - Locked/corrupted file handling is governed by `processing.locked_files` and `processing.corrupted_files`; use `copy|skip|wait` or `quarantine|skip` to steer ingestion behaviour.
 - Automatic renaming can be toggled with `organization.rename_files`; set to `false` to keep original filenames while still recording suggestions in state.
+- Classification runs locally using heuristics by default; set `DORGY_ENABLE_DSPY=1` (with DSPy installed/configured) to enable LLM-backed classification and rename suggestions.

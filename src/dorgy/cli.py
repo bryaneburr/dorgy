@@ -107,6 +107,8 @@ def _descriptor_to_record(
     rename_suggestion: Optional[str] = None
     reasoning: Optional[str] = None
 
+    needs_review = False
+
     if decision is not None:
         categories = [decision.primary_category]
         categories.extend(decision.secondary_categories)
@@ -114,6 +116,7 @@ def _descriptor_to_record(
         confidence = decision.confidence
         rename_suggestion = decision.rename_suggestion
         reasoning = decision.reasoning
+        needs_review = decision.needs_review
 
     return FileRecord(
         path=str(relative),
@@ -124,6 +127,7 @@ def _descriptor_to_record(
         last_modified=last_modified,
         rename_suggestion=rename_suggestion,
         reasoning=reasoning,
+        needs_review=needs_review,
     )
 
 
@@ -341,9 +345,17 @@ def org(
         classification_cache,
     )
 
+    paired = list(_zip_decisions(classification_batch, result.processed))
+    confidence_threshold = config.ambiguity.confidence_threshold
+    for decision, descriptor in paired:
+        if decision is not None and decision.confidence < confidence_threshold:
+            decision.needs_review = True
+            if descriptor.path not in result.needs_review:
+                result.needs_review.append(descriptor.path)
+
     if json_output:
         payload = []
-        for decision, descriptor in _zip_decisions(classification_batch, result.processed):
+        for decision, descriptor in paired:
             payload.append(
                 {
                     "descriptor": descriptor.model_dump(mode="python"),
@@ -360,7 +372,7 @@ def org(
         table.add_column("Size", justify="right")
         table.add_column("Category")
         table.add_column("Preview", overflow="fold")
-        for decision, descriptor in _zip_decisions(classification_batch, result.processed):
+        for decision, descriptor in paired:
             metadata = descriptor.metadata
             try:
                 relative_path = descriptor.path.relative_to(root)
@@ -437,7 +449,7 @@ def org(
     except MissingStateError:
         state = CollectionState(root=str(root))
 
-    for decision, descriptor in _zip_decisions(classification_batch, result.processed):
+    for decision, descriptor in paired:
         record = _descriptor_to_record(descriptor, decision, root)
         old_relative = _relative_to_collection(descriptor.path, root)
 
