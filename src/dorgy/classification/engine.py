@@ -8,7 +8,9 @@ we can still exercise the higher-level pipeline in development and tests.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Iterable, Optional
@@ -44,7 +46,8 @@ class ClassificationEngine:
     """
 
     def __init__(self) -> None:
-        self._has_dspy = dspy is not None
+        enable_dspy = os.getenv("DORGY_ENABLE_DSPY") == "1"
+        self._has_dspy = dspy is not None and enable_dspy
         if self._has_dspy:
             try:
                 self._program = self._build_program()
@@ -84,9 +87,57 @@ class ClassificationEngine:
         Returns:
             Any: DSPy program object that can be executed for classification.
         """
-        raise NotImplementedError(
-            "ClassificationEngine._build_program will be implemented in Phase 3."
-        )
+
+        if dspy is None:  # pragma: no cover - guarded by caller
+            raise RuntimeError("DSPy is not installed")
+
+        class FileClassificationSignature(dspy.Signature):
+            """Classify a file into categories and generate tags."""
+
+            filename: str = dspy.InputField()
+            file_type: str = dspy.InputField()
+            content_preview: str = dspy.InputField()
+            metadata: str = dspy.InputField()
+            prompt: str = dspy.InputField()
+
+            primary_category: str = dspy.OutputField()
+            secondary_categories: list[str] = dspy.OutputField()
+            tags: list[str] = dspy.OutputField()
+            confidence: str = dspy.OutputField()
+            reasoning: str = dspy.OutputField()
+
+        class FileRenamingSignature(dspy.Signature):
+            """Generate a descriptive filename for a file."""
+
+            filename: str = dspy.InputField()
+            file_type: str = dspy.InputField()
+            content_preview: str = dspy.InputField()
+            metadata: str = dspy.InputField()
+            category: str = dspy.InputField()
+            prompt: str = dspy.InputField()
+
+            suggested_name: str = dspy.OutputField()
+            reasoning: str = dspy.OutputField()
+
+        class DorgyClassifier(dspy.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.classifier = dspy.ChainOfThought(FileClassificationSignature)
+                self.renamer = dspy.ChainOfThought(FileRenamingSignature)
+
+            def forward(self, payload: dict[str, str]):
+                classification = self.classifier(**payload)
+                rename = self.renamer(
+                    filename=payload["filename"],
+                    file_type=payload["file_type"],
+                    content_preview=payload["content_preview"],
+                    metadata=payload["metadata"],
+                    category=classification.primary_category,
+                    prompt=payload["prompt"],
+                )
+                return classification, rename
+
+        return DorgyClassifier()
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                   #
@@ -101,7 +152,46 @@ class ClassificationEngine:
         Returns:
             ClassificationDecision: Result derived from DSPy output.
         """
-        raise NotImplementedError("DSPy integration not yet implemented.")
+        if self._program is None:
+            raise RuntimeError("DSPy program has not been initialised")
+
+        descriptor = request.descriptor
+        metadata_dump = json.dumps(descriptor.metadata, ensure_ascii=False)
+
+        payload = {
+            "filename": descriptor.display_name,
+            "file_type": descriptor.mime_type,
+            "content_preview": descriptor.preview or "",
+            "metadata": metadata_dump,
+            "prompt": request.prompt or "",
+        }
+
+        classification, rename = self._program.forward(payload)
+
+        try:
+            confidence = float(classification.confidence)
+        except (ValueError, TypeError):
+            confidence = 0.0
+
+        secondary = classification.secondary_categories or []
+        tags = classification.tags or []
+        rename_suggestion = getattr(rename, "suggested_name", None)
+
+        needs_review = confidence < 0.5
+        reasoning_parts = [classification.reasoning]
+        if getattr(rename, "reasoning", None):
+            reasoning_parts.append(rename.reasoning)
+        reasoning = "\n".join(part for part in reasoning_parts if part)
+
+        return ClassificationDecision(
+            primary_category=classification.primary_category or "General",
+            secondary_categories=[cat for cat in secondary if cat],
+            tags=[tag for tag in tags if tag],
+            confidence=confidence,
+            rename_suggestion=rename_suggestion or None,
+            reasoning=reasoning or None,
+            needs_review=needs_review,
+        )
 
     def _fallback_classify(self, request: ClassificationRequest) -> ClassificationDecision:
         """Heuristic classification used when DSPy is unavailable.

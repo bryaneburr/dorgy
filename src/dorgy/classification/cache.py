@@ -56,9 +56,7 @@ class ClassificationCache:
                 self._path.unlink()
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(self._data, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        self._path.write_text(json.dumps(self._data, indent=2, sort_keys=True), encoding="utf-8")
 
     def get(self, key: str) -> Optional[ClassificationDecision]:
         """Retrieve a cached decision.
