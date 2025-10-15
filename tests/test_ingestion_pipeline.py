@@ -1,6 +1,8 @@
-"""Tests covering the ingestion scaffolding implementation."""
+"""Tests covering the ingestion implementation."""
 
 from pathlib import Path
+
+from PIL import Image
 
 from dorgy.ingestion import IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
@@ -35,6 +37,9 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
     file_path = tmp_path / "note.txt"
     file_path.write_text("first line\nsecond", encoding="utf-8")
 
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (32, 16), color="red").save(image_path)
+
     pipeline = IngestionPipeline(
         scanner=DirectoryScanner(
             recursive=True,
@@ -49,12 +54,20 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
 
     result = pipeline.run([tmp_path])
 
-    assert len(result.processed) == 1
-    descriptor = result.processed[0]
-    assert descriptor.display_name == "note.txt"
-    assert descriptor.mime_type.startswith("text/")
-    assert descriptor.hash
-    assert descriptor.preview is not None and "first line" in descriptor.preview
-    assert descriptor.metadata["size_bytes"] == str(file_path.stat().st_size)
+    assert len(result.processed) == 2
+    descriptors = {descriptor.display_name: descriptor for descriptor in result.processed}
+
+    text_desc = descriptors["note.txt"]
+    assert text_desc.mime_type.startswith("text/")
+    assert text_desc.hash
+    assert text_desc.preview is not None and "first line" in text_desc.preview
+    assert text_desc.metadata["size_bytes"] == str(file_path.stat().st_size)
+    assert text_desc.metadata.get("sampled_lines") == "2"
+
+    image_desc = descriptors["image.png"]
+    assert image_desc.mime_type.startswith("image/")
+    assert image_desc.metadata["image_width"] == "32"
+    assert image_desc.metadata["image_height"] == "16"
+
     assert not result.needs_review
     assert not result.errors

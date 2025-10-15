@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import MissingStateError, StateError
-from .models import CollectionState
+from .models import CollectionState, FileRecord
 
 DEFAULT_STATE_DIRNAME = ".dorgy"
 
@@ -83,6 +83,7 @@ __all__ = [
     "StateRepository",
     "DEFAULT_STATE_DIRNAME",
     "CollectionState",
+    "FileRecord",
     "StateError",
     "MissingStateError",
 ]

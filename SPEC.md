@@ -338,6 +338,15 @@ The project will progress through the following phases. Update the status column
 - Locked files follow the `processing.locked_files` policy (copy/skip/wait) with configurable retries.
 - `StateRepository` will persist `orig.json`, `needs-review/`, `quarantine/`, and other metadata under `.dorgy/`.
 
+## Phase 3 – LLM & DSPy Integration Goals
+
+- Convert `FileDescriptor` outputs into DSPy `FileClassification` and `FileRenaming` signatures, capturing reasoning, tags, and confidence scores.
+- Introduce a provider-agnostic LLM client (local/cloud) with retry/backoff, prompt templates derived from SPEC examples, and caching via the state repository.
+- Implement low-confidence handling: route items below the ambiguity threshold to `.dorgy/needs-review` and surface them in CLI summaries.
+- Feed organization results back into `StateRepository` (categories, tags, rename suggestions) while preserving rollback data (`orig.json`).
+- Extend CLI (`org`, `watch`, `search`, `mv`) to consume the classification pipeline, including prompt support and JSON/dry-run parity.
+- Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
+
 ### Goals
 - Build a reusable ingestion pipeline that discovers files, extracts metadata/previews, and produces `FileDescriptor` objects for downstream classification.
 - Respect configuration toggles for recursion, hidden files, symlink handling, maximum sizes, and locked/corrupted file policies.

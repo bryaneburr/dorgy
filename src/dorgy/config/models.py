@@ -30,6 +30,7 @@ class ProcessingOptions(DorgyBaseModel):
     process_audio: bool = False
     follow_symlinks: bool = False
     process_hidden_files: bool = False
+    recurse_directories: bool = False
     max_file_size_mb: int = 100
     sample_size_mb: int = 10
 
