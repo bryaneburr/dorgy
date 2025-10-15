@@ -26,6 +26,8 @@ from dorgy.ingestion import FileDescriptor, IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
+from dorgy.organization.executor import OperationExecutor
+from dorgy.organization.planner import OrganizerPlanner
 from dorgy.state import CollectionState, FileRecord, MissingStateError, StateRepository
 
 console = Console()
@@ -353,15 +355,27 @@ def org(
             if descriptor.path not in result.needs_review:
                 result.needs_review.append(descriptor.path)
 
+    planner = OrganizerPlanner()
+    plan = planner.build_plan(
+        descriptors=[descriptor for _, descriptor in paired],
+        decisions=[decision for decision, _ in paired],
+        rename_enabled=config.organization.rename_files,
+    )
+    rename_map = {operation.source: operation.destination for operation in plan.renames}
+
     if json_output:
         payload = []
         for decision, descriptor in paired:
+            rename_target = rename_map.get(descriptor.path)
             payload.append(
                 {
                     "descriptor": descriptor.model_dump(mode="python"),
                     "classification": decision.model_dump(mode="python")
                     if decision is not None
                     else None,
+                    "operations": {
+                        "rename": rename_target.as_posix() if rename_target is not None else None,
+                    },
                 }
             )
         console.print_json(data=payload)
@@ -405,6 +419,8 @@ def org(
                 f"[green]Classification completed ({len(classification_batch.decisions)} files, "
                 f"{review_count} marked for review).[/green]"
             )
+        if plan.renames:
+            console.print(f"[cyan]{len(plan.renames)} rename operations planned/applied.[/cyan]")
         if prompt:
             console.print(
                 "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
@@ -449,19 +465,21 @@ def org(
     except MissingStateError:
         state = CollectionState(root=str(root))
 
-    for decision, descriptor in paired:
-        record = _descriptor_to_record(descriptor, decision, root)
-        old_relative = _relative_to_collection(descriptor.path, root)
+    executor = OperationExecutor()
+    if not dry_run:
+        try:
+            executor.apply(plan, root)
+        except Exception as exc:
+            raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
 
-        if (
-            not dry_run
-            and config.organization.rename_files
-            and decision is not None
-            and decision.rename_suggestion
-        ):
-            descriptor.path = _apply_rename(descriptor.path, decision.rename_suggestion)
+    for decision, descriptor in paired:
+        old_path = descriptor.path
+        new_path = rename_map.get(old_path)
+        if not dry_run and new_path is not None:
+            descriptor.path = new_path
             descriptor.display_name = descriptor.path.name
-            record.path = _relative_to_collection(descriptor.path, root)
+        record = _descriptor_to_record(descriptor, decision, root)
+        old_relative = _relative_to_collection(old_path, root)
 
         state.files.pop(old_relative, None)
         state.files[record.path] = record
