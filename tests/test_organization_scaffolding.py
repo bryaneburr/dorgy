@@ -47,3 +47,28 @@ def test_executor_applies_rename(tmp_path: Path) -> None:
 
     assert not source.exists()
     assert destination.exists()
+
+
+def test_planner_resolves_conflicts(tmp_path: Path) -> None:
+    original = tmp_path / "doc.txt"
+    original.write_text("content", encoding="utf-8")
+    other = tmp_path / "other.txt"
+    other.write_text("content", encoding="utf-8")
+
+    existing = tmp_path / "report.txt"
+    existing.write_text("existing", encoding="utf-8")
+
+    descriptors = [
+        FileDescriptor(path=original, display_name="doc.txt", mime_type="text/plain", hash="1"),
+        FileDescriptor(path=other, display_name="other.txt", mime_type="text/plain", hash="2"),
+    ]
+    decisions = [
+        ClassificationDecision(primary_category="Docs", rename_suggestion="report"),
+        ClassificationDecision(primary_category="Docs", rename_suggestion="report"),
+    ]
+
+    planner = OrganizerPlanner()
+    plan = planner.build_plan(descriptors, decisions, rename_enabled=True, root=tmp_path)
+
+    destinations = {rename.destination.name for rename in plan.renames}
+    assert destinations == {"report-1.txt", "report-2.txt"}

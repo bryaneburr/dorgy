@@ -360,6 +360,7 @@ def org(
         descriptors=[descriptor for _, descriptor in paired],
         decisions=[decision for decision, _ in paired],
         rename_enabled=config.organization.rename_files,
+        root=root,
     )
     rename_map = {operation.source: operation.destination for operation in plan.renames}
 
