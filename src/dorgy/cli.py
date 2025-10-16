@@ -33,6 +33,7 @@ from dorgy.state import (
     FileRecord,
     MissingStateError,
     OperationEvent,
+    StateError,
     StateRepository,
 )
 
@@ -234,6 +235,37 @@ def _relative_to_collection(path: Path, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
+
+
+def _build_original_snapshot(
+    descriptors: Iterable[FileDescriptor],
+    root: Path,
+) -> dict[str, Any]:
+    """Create a snapshot describing the pre-organization file structure.
+
+    Args:
+        descriptors: File descriptors produced before any moves/renames.
+        root: Collection root path used to compute relative paths.
+
+    Returns:
+        dict[str, Any]: Snapshot payload ready to persist via the state repository.
+    """
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    entries: list[dict[str, Any]] = []
+    for descriptor in descriptors:
+        entries.append(
+            {
+                "path": _relative_to_collection(descriptor.path, root),
+                "display_name": descriptor.display_name,
+                "mime_type": descriptor.mime_type,
+                "hash": descriptor.hash,
+                "size_bytes": descriptor.metadata.get("size_bytes"),
+                "tags": list(descriptor.tags),
+            }
+        )
+
+    return {"generated_at": generated_at, "entries": entries}
 
 
 def _decision_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
@@ -483,10 +515,16 @@ def org(
     except MissingStateError:
         state = CollectionState(root=str(root))
 
+    snapshot: dict[str, Any] | None = None
+    if not dry_run:
+        snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], root)
+
     executor = OperationExecutor()
     events: list[OperationEvent] = []
     if not dry_run:
         try:
+            if snapshot is not None:
+                repository.write_original_structure(root, snapshot)
             events = executor.apply(plan, root)
         except Exception as exc:
             raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
@@ -748,6 +786,21 @@ def undo(path: str, dry_run: bool) -> None:
                 "[yellow]Plan contains "
                 f"{len(plan.renames)} renames and {len(plan.moves)} moves.[/yellow]"
             )
+        try:
+            snapshot = repository.load_original_structure(root)
+        except StateError as exc:
+            console.print(f"[yellow]Unable to load original snapshot: {exc}[/yellow]")
+        else:
+            if snapshot:
+                entries = snapshot.get("entries", [])
+                console.print(
+                    f"[yellow]Snapshot captured {len(entries)} original entries before organization.[/yellow]"
+                )
+                preview = [entry.get("path", "?") for entry in entries[:5]]
+                if preview:
+                    console.print("[yellow]Sample paths:[/yellow]")
+                    for sample in preview:
+                        console.print(f"  - {sample}")
         return
 
     try:

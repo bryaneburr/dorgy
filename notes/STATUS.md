@@ -50,3 +50,4 @@
 - Observed test suite summary: 37 passed, 1 skipped (DSPy optional dependency).
 - Next actions: wire history playback into undo/status commands and outline transactional staging requirements before expanding to watch/mv integration for Phase 5.
 - Persisted rename/move history events to `.dorgy/history.jsonl`, exposed `OperationEvent` models, and wired `StateRepository.append_history` with executor-generated records. Updated state tests/docs accordingly and re-ran `uv run pytest` (38 passed, 1 skipped) to verify the new logging.
+- Captured ingestion snapshots into `.dorgy/orig.json` before organization runs, exposed them through `dorgy undo --dry-run`, and expanded CLI/state tests to cover the snapshot schema.

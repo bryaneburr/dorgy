@@ -54,6 +54,11 @@ def test_cli_org_persists_state(tmp_path: Path) -> None:
     assert record.get("needs_review") is True
     final_path = root / "documents" / "doc.txt"
     assert final_path.exists()
+    snapshot_path = root / ".dorgy" / "orig.json"
+    assert snapshot_path.exists()
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot_paths = {entry["path"] for entry in snapshot.get("entries", [])}
+    assert "doc.txt" in snapshot_paths
 
 
 def test_cli_org_classification_updates_state(tmp_path: Path) -> None:
@@ -163,3 +168,23 @@ def test_cli_org_renames_files_when_enabled(tmp_path: Path) -> None:
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert "documents/report-2020.TXT" in state["files"]
     assert state["files"]["documents/report-2020.TXT"]["rename_suggestion"] == "report-2020"
+
+
+def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:
+    """Undo dry-run should surface snapshot details for user confirmation."""
+
+    root = tmp_path / "history"
+    root.mkdir()
+    (root / "note.txt").write_text("content", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    undo_result = runner.invoke(cli, ["undo", str(root), "--dry-run"], env=env)
+
+    assert undo_result.exit_code == 0
+    assert "Snapshot captured" in undo_result.output
+    assert "note.txt" in undo_result.output
