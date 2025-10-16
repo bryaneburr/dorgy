@@ -401,4 +401,5 @@ The project will progress through the following phases. Update the status column
 - Conflict resolution respects `organization.conflict_resolution` (append_number, timestamp, skip), and rename/move operations surface plan notes describing how collisions were handled; moves still place files into category folders derived from classification decisions.
 - Operation history is appended to `.dorgy/history.jsonl` capturing timestamps, pre/post paths, conflict metadata, and reasoning for every rename/move.
 - `orig.json` now stores per-run snapshots (`generated_at`, `entries`) based on ingestion descriptors, and `dorgy undo --dry-run` surfaces a preview of captured paths for rollback confirmation.
+- Executor stages file mutations in `.dorgy/staging/<session>` before committing renames/moves, providing automatic rollback if conflicts occur mid-plan.
 - Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.

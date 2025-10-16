@@ -519,7 +519,7 @@ def org(
     if not dry_run:
         snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], root)
 
-    executor = OperationExecutor()
+    executor = OperationExecutor(staging_root=state_dir / "staging")
     events: list[OperationEvent] = []
     if not dry_run:
         try:
@@ -769,7 +769,7 @@ def undo(path: str, dry_run: bool) -> None:
 
     root = Path(path).expanduser().resolve()
     repository = StateRepository()
-    executor = OperationExecutor()
+    executor = OperationExecutor(staging_root=root / ".dorgy" / "staging")
 
     try:
         state = repository.load(root)

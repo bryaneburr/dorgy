@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from dorgy.classification.models import ClassificationDecision
 from dorgy.ingestion.models import FileDescriptor
 from dorgy.organization.executor import OperationExecutor
@@ -54,6 +56,28 @@ def test_executor_applies_rename(tmp_path: Path) -> None:
     assert event.source == "old.txt"
     assert event.destination == "new.txt"
     assert event.conflict_applied is False
+
+
+def test_executor_rollback_on_failure(tmp_path: Path) -> None:
+    source = tmp_path / "file.txt"
+    source.write_text("data", encoding="utf-8")
+    conflict = tmp_path / "conflict.txt"
+    conflict.write_text("existing", encoding="utf-8")
+
+    plan = OperationPlan(
+        renames=[RenameOperation(source=source, destination=conflict)],
+    )
+
+    executor = OperationExecutor()
+
+    with pytest.raises(FileExistsError):
+        executor.apply(plan, root=tmp_path)
+
+    assert source.exists()
+    assert conflict.read_text(encoding="utf-8") == "existing"
+    staging_root = tmp_path / ".dorgy" / "staging"
+    if staging_root.exists():
+        assert not any(staging_root.iterdir())
 
 
 def test_planner_resolves_conflicts(tmp_path: Path) -> None:

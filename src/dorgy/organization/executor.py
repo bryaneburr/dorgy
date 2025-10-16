@@ -1,7 +1,10 @@
-"""Executor for organization plans."""
+"""Executor for organization plans with staging safeguards."""
 
 from __future__ import annotations
 
+import shutil
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Literal
@@ -11,11 +14,21 @@ from dorgy.state import OperationEvent
 from .models import MoveOperation, OperationPlan, RenameOperation
 
 
-class OperationExecutor:
-    """Apply operation plans with rollback support."""
+@dataclass
+class _StagedFile:
+    """Track staging metadata for an individual file mutation."""
 
-    def __init__(self) -> None:
+    original: Path
+    stage: Path
+    current_location: Path
+
+
+class OperationExecutor:
+    """Apply operation plans with staging and rollback support."""
+
+    def __init__(self, staging_root: Path | None = None) -> None:
         self._last_plan: OperationPlan | None = None
+        self._staging_root = staging_root
 
     def apply(
         self,
@@ -37,49 +50,77 @@ class OperationExecutor:
         self._last_plan = plan
         self._validate(plan, root)
 
-        if dry_run:
+        if dry_run or (not plan.renames and not plan.moves):
             return []
 
-        events: list[OperationEvent] = []
-
+        session_dir = self._prepare_session(root)
+        staged_files: dict[Path, _StagedFile] = {}
+        original_for_path: dict[Path, Path] = {}
         for rename_op in plan.renames:
-            events.append(
-                self._create_event(
-                    operation="rename",
-                    source=rename_op.source,
-                    destination=rename_op.destination,
-                    root=root,
-                    conflict_strategy=rename_op.conflict_strategy,
-                    conflict_applied=rename_op.conflict_applied,
-                    notes=self._notes_from_operation(rename_op),
-                )
-            )
-            destination_parent = rename_op.destination.parent
-            destination_parent.mkdir(parents=True, exist_ok=True)
-            if rename_op.destination.exists() and rename_op.destination != rename_op.source:
-                raise FileExistsError(f"Destination already exists: {rename_op.destination}")
-            rename_op.source.rename(rename_op.destination)
+            original_for_path[rename_op.destination] = rename_op.source
 
+        move_originals: dict[Path, MoveOperation] = {}
         for move_op in plan.moves:
-            events.append(
-                self._create_event(
-                    operation="move",
-                    source=move_op.source,
-                    destination=move_op.destination,
-                    root=root,
-                    conflict_strategy=move_op.conflict_strategy,
-                    conflict_applied=move_op.conflict_applied,
-                    notes=self._notes_from_operation(move_op),
-                )
-            )
-            destination_parent = move_op.destination.parent
-            destination_parent.mkdir(parents=True, exist_ok=True)
-            if move_op.destination.exists() and move_op.destination != move_op.source:
-                raise FileExistsError(f"Destination already exists: {move_op.destination}")
-            move_op.source.rename(move_op.destination)
+            original_source = original_for_path.get(move_op.source, move_op.source)
+            move_originals[original_source] = move_op
 
-        self._persist_plan(plan, root)
-        return events
+        sources = {op.source for op in plan.renames}
+        sources.update(move_originals.keys())
+
+        try:
+            for original in sources:
+                stage_path = self._stage_file(original, root, session_dir)
+                staged_files[original] = _StagedFile(
+                    original=original,
+                    stage=stage_path,
+                    current_location=stage_path,
+                )
+
+            events: list[OperationEvent] = []
+
+            # Apply rename operations from staged files to their destinations.
+            for rename_op in plan.renames:
+                entry = staged_files.get(rename_op.source)
+                if entry is None:
+                    continue
+                self._move_file(entry.current_location, rename_op.destination)
+                entry.current_location = rename_op.destination
+                events.append(
+                    self._create_event(
+                        operation="rename",
+                        source=rename_op.source,
+                        destination=rename_op.destination,
+                        root=root,
+                        conflict_strategy=rename_op.conflict_strategy,
+                        conflict_applied=rename_op.conflict_applied,
+                        notes=self._notes_from_operation(rename_op),
+                    )
+                )
+
+            # Apply move operations from their current location to final destinations.
+            for original, move_op in move_originals.items():
+                entry = staged_files[original]
+                self._move_file(entry.current_location, move_op.destination)
+                entry.current_location = move_op.destination
+                events.append(
+                    self._create_event(
+                        operation="move",
+                        source=move_op.source,
+                        destination=move_op.destination,
+                        root=root,
+                        conflict_strategy=move_op.conflict_strategy,
+                        conflict_applied=move_op.conflict_applied,
+                        notes=self._notes_from_operation(move_op),
+                    )
+                )
+
+            self._persist_plan(plan, root)
+            return events
+        except Exception:
+            self._restore_staged_files(staged_files)
+            raise
+        finally:
+            self._cleanup_session(session_dir)
 
     def rollback(self, root: Path) -> None:
         """Rollback the last applied plan."""
@@ -98,6 +139,44 @@ class OperationExecutor:
 
         self._persist_plan(None, root)
         self._last_plan = None
+
+    def _prepare_session(self, root: Path) -> Path:
+        base = self._staging_root or (root / ".dorgy" / "staging")
+        base.mkdir(parents=True, exist_ok=True)
+        session_dir = base / uuid.uuid4().hex
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_dir
+
+    def _stage_file(self, source: Path, root: Path, session_dir: Path) -> Path:
+        try:
+            relative_path = source.resolve().relative_to(root.resolve())
+        except ValueError:
+            relative_path = Path(source.name)
+        stage_path = session_dir / relative_path
+        stage_path.parent.mkdir(parents=True, exist_ok=True)
+        if not source.exists():
+            raise FileNotFoundError(f"Source path is missing: {source}")
+        if stage_path.exists():
+            raise FileExistsError(f"Staging path already exists: {stage_path}")
+        source.rename(stage_path)
+        return stage_path
+
+    def _move_file(self, source: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists() and destination != source:
+            raise FileExistsError(f"Destination already exists: {destination}")
+        source.rename(destination)
+
+    def _restore_staged_files(self, staged_files: dict[Path, _StagedFile]) -> None:
+        for entry in staged_files.values():
+            for candidate in [entry.current_location, entry.stage]:
+                if candidate.exists():
+                    candidate.rename(entry.original)
+                    break
+
+    def _cleanup_session(self, session_dir: Path) -> None:
+        if session_dir.exists():
+            shutil.rmtree(session_dir, ignore_errors=True)
 
     def _validate(self, plan: OperationPlan, root: Path) -> None:
         predicted_sources = {rename_op.destination for rename_op in plan.renames}
