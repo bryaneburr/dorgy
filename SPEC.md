@@ -162,6 +162,12 @@ logging:
   max_size_mb: 100
   backup_count: 5
 
+# CLI Defaults
+cli:
+  quiet_default: false
+  summary_default: false
+  status_history_limit: 5
+
 # User-defined Rules (optional)
 rules:
   # Example: Force certain patterns to specific categories
@@ -291,6 +297,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
 | [x] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
 | [x] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
+| [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
 | [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
@@ -406,3 +413,21 @@ The project will progress through the following phases. Update the status column
 - `dorgy undo` supports `--json` preview and execution output, exposing plan/snapshot/history details for tooling integrations.
 - `dorgy status` reports collection summaries (state counts, recent history, snapshot metadata) in both text and JSON formats for inspection.
 - Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.
+
+## Phase 4.5 – CLI Polish & UX
+
+### Goals
+- Harmonize CLI summaries, providing `--summary/--quiet` toggles across `org`, `status`, and `undo` while surfacing destination and operation counts.
+- Extend executed `--json` flows to mirror dry-run payloads with final plan details, state persistence metadata, and history entries.
+- Standardize error handling with structured JSON payloads and configuration-driven defaults for verbosity controls.
+
+### Deliverables
+- Updated CLI commands with shared summary helpers, structured error emitters, and comprehensive flag validation (`--summary`, `--quiet`, `--json`).
+- New `cli` configuration options (`quiet_default`, `summary_default`, `status_history_limit`) with environment override support and test coverage.
+- Expanded CLI integration tests covering summary/quiet modes, JSON error payloads, and configuration fallbacks alongside refreshed documentation.
+
+### Progress Summary
+- `dorgy org`, `status`, and `undo` now share consistent summary messaging, expose `--summary/--quiet` toggles, and report destination roots plus rename/move/conflict counts.
+- Executed `dorgy org --json` responses include context, counts, plan dumps, history events, and state metadata; dry-run parity retained.
+- CLI defaults are configurable via the new `cli` block in `config.yaml` with precedence verified for file/CLI/env overrides and corresponding tests.
+- JSON errors are emitted uniformly (`{"error": {"code": ..., "message": ...}}`), and new tests validate quiet defaults, summary output, and structured error responses.

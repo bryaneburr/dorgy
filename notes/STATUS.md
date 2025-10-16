@@ -56,3 +56,9 @@
 - Implemented `dorgy org --output PATH` relocation by copying organized files into the target directory, preserving originals and persisting state/history under the destination `.dorgy`; updated CLI/executor to support copy-mode staging and added integration coverage.
 - Added `dorgy undo --json` for machine-readable rollback previews/results, serialising plans, snapshots, and recent history; expanded CLI tests to assert JSON payload shape (43 passed, 1 skipped).
 - Introduced `dorgy status` for read-only collection summaries (text/JSON) leveraging state, history, and snapshot metadata; documented the command and validated output via new CLI tests (46 passed, 1 skipped).
+
+## 2025-10-20
+- Delivered Phase 4.5 CLI polish: shared summary helpers, `--summary/--quiet` toggles, standardised JSON error payloads, and executed `dorgy org --json` parity covering plan/state/history details.
+- Added a `cli` configuration block (quiet/summary defaults, status history limit), refreshed README/SPEC guidance, and expanded tests for precedence plus new summary/quiet behaviours.
+- Extended CLI integration coverage for JSON error responses and quiet defaults; `uv run pytest` now reports 51 passed, 1 skipped.
+- Next actions: begin Phase 5 watch service planning and extend the polished UX patterns to upcoming watch/mv/search commands.

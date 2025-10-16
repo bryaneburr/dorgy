@@ -131,6 +131,20 @@ class LoggingSettings(DorgyBaseModel):
     backup_count: int = 5
 
 
+class CLIOptions(DorgyBaseModel):
+    """CLI behavior defaults and presentation preferences.
+
+    Attributes:
+        quiet_default: Whether commands suppress non-error output by default.
+        summary_default: Whether commands only print summary lines by default.
+        status_history_limit: Default number of status history entries to display.
+    """
+
+    quiet_default: bool = False
+    summary_default: bool = False
+    status_history_limit: int = 5
+
+
 class DorgyConfig(DorgyBaseModel):
     """Top-level configuration struct for Dorgy.
 
@@ -140,6 +154,7 @@ class DorgyConfig(DorgyBaseModel):
         organization: Post-ingestion organization settings.
         ambiguity: Ambiguity-handling settings.
         logging: Logging configuration.
+        cli: CLI presentation defaults.
         rules: List of dynamic rule definitions.
     """
 
@@ -148,6 +163,7 @@ class DorgyConfig(DorgyBaseModel):
     organization: OrganizationOptions = Field(default_factory=OrganizationOptions)
     ambiguity: AmbiguitySettings = Field(default_factory=AmbiguitySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    cli: CLIOptions = Field(default_factory=CLIOptions)
     rules: List[dict] = Field(default_factory=list)
 
 
@@ -160,5 +176,6 @@ __all__ = [
     "OrganizationOptions",
     "AmbiguitySettings",
     "LoggingSettings",
+    "CLIOptions",
     "DorgyConfig",
 ]

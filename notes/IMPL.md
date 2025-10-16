@@ -47,6 +47,6 @@
 - Additional flags/config may require reconciliation with upcoming watch/mv implementations.
 
 ## Next Steps
-- Prioritize Phase 4.5 tasks, create `feature/phase-4-5-cli-polish` branch.
-- Implement enhancements iteratively with checkpoints (start with output consistency + JSON execution support, then extend to error handling/config integration).
-- Maintain test coverage alongside documentation updates to keep CLI behavior deterministic ahead of Phase 5.
+- Kick off Phase 5 watch service work on `feature/phase-5-watch`, focusing on event debouncing and safe reuse of the ingestion/organization pipeline.
+- Extend the polished CLI UX (summary helpers, JSON payloads, config defaults) to upcoming commands (`watch`, `mv`, `search`) as they come online.
+- Continue updating documentation/tests alongside new automation entry points to preserve deterministic behaviour before broader CLI rollout.
