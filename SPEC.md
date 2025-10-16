@@ -289,8 +289,8 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline + config/state scaffolding |
 | [x] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers – config CLI + state repository persistence |
 | [x] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
-| [~] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
-| [~] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
+| [x] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
+| [x] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
