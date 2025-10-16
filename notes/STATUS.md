@@ -62,3 +62,9 @@
 - Added a `cli` configuration block (quiet/summary defaults, status history limit), refreshed README/SPEC guidance, and expanded tests for precedence plus new summary/quiet behaviours.
 - Extended CLI integration coverage for JSON error responses and quiet defaults; `uv run pytest` now reports 51 passed, 1 skipped.
 - Next actions: begin Phase 5 watch service planning and extend the polished UX patterns to upcoming watch/mv/search commands.
+
+## 2025-10-21
+- Implemented Phase 5 watch service (`dorgy watch`) with `--once`, JSON/quiet/summary parity, and configurable debounce/backoff sourced from `processing.watch` defaults.
+- Added `WatchService` to batch filesystem events, reuse the ingestion/classification/organization pipeline, and persist incremental updates to `.dorgy/state.json`, `.dorgy/history.jsonl`, and `.dorgy/watch.log`.
+- Documented the workflow in SPEC/README/AGENTS (including module-specific guidance) and introduced CLI integration tests in `tests/test_cli_watch.py` covering one-shot and JSON flows.
+- Updated SPEC phase tracking and configuration snippets and refreshed README highlights to surface the new watch behaviour.

@@ -50,3 +50,97 @@
 - Kick off Phase 5 watch service work on `feature/phase-5-watch`, focusing on event debouncing and safe reuse of the ingestion/organization pipeline.
 - Extend the polished CLI UX (summary helpers, JSON payloads, config defaults) to upcoming commands (`watch`, `mv`, `search`) as they come online.
 - Continue updating documentation/tests alongside new automation entry points to preserve deterministic behaviour before broader CLI rollout.
+
+## Phase 5 – Watch Service Implementation Plan
+
+### Goals
+- Continuously monitor one or more directories for new/modified files and feed them through the ingestion → classification → organization pipeline.
+- Respect existing config toggles (hidden files, size limits, locked/corrupted policies, rename settings, ambiguity thresholds).
+- Ensure concurrent runs are safe: avoid duplicate processing, stage operations atomically (reuse executor staging), and handle transient errors with backoff.
+- Provide CLI ergonomics mirroring `dorgy org` (dry-run, JSON preview, prompt injection, output relocation); allow per-run overrides.
+- Persist incremental state updates so the collection remains consistent (history, snapshots, state.json) after each batch.
+
+### Milestones
+1. **Scaffolding & Configuration**
+   - Add `watch` options to config defaults (`processing.watch` section for debounce/backoff).
+   - Update `SPEC.md`/`README.md` to surface watch expectations; add AGENT guidance.
+   - Create `feature/phase-5-watch` branch.
+
+2. **File System Monitoring Layer**
+   - Integrate `watchdog` observer with handlers for `created`/`modified` events (skip deletes for MVP).
+   - Implement debounce/coalescing to batch events (e.g., configurable interval).
+   - Respect recursion toggle and filters from config; reuse `DirectoryScanner` for initial priming if necessary.
+
+3. **Pipeline Reuse & Task Scheduling**
+   - Adapt ingestion pipeline to accept incremental file lists; consider staging directories for locked files as in Phase 4.
+   - Reuse classification cache and organization planner/executor; ensure copy-mode works when `--output` is supplied.
+   - Implement a work queue/async loop to serialize organization runs (prevent overlapping plans).
+
+4. **CLI Command (`dorgy watch`)**
+   - Provide flags: `--recursive`, `--output`, `--debounce`, `--json`, `--prompt`, `--once` (process and exit) for testing.
+   - Support dry-run mode (log what would be processed without applying changes).
+   - Show live feedback (Rich progress or summaries) and log to `.dorgy/watch.log`.
+
+5. **State Persistence & Resilience**
+   - After each batch, update `state.json`, append history entries, refresh snapshots (consider incremental strategy to avoid large snapshots each time).
+   - Handle exceptions gracefully (retry with exponential backoff, skip problematic files with clear errors).
+   - Ensure graceful shutdown (flush pending events, close observer).
+
+6. **Testing & Tooling**
+   - Unit tests for debounce logic, queue processing, and configuration adapters.
+   - Integration tests using temp directories and synthetic watchdog events (pytest watchdog fixtures or manual triggers).
+   - Document testing strategy for real file system events (manual checklist for QA).
+
+### Risks & Open Questions
+- Long-running observer resource management (threading, signal handling) within CLI execution.
+- Interaction with DSPy classification latency; may need worker threads or async pipeline to avoid blocking event loop.
+- Snapshot size growth with frequent runs; consider incremental metadata or periodic pruning.
+- Windows/macOS path handling and watchdog compatibility.
+- Coordination with future Phase 6 CLI polish (ensure watch command aligns with quiet/JSON options planned in Phase 4.5).
+
+### Next Steps
+- Finalize configuration schema updates and planning details in `SPEC.md`.
+- Kick off implementation on `feature/phase-5-watch`, prioritizing configuration + monitoring scaffolding.
+- Schedule follow-up checkpoints for pipeline integration and CLI wiring.
+
+## Phase 5.5 – Watch Deletions & External Moves
+
+### Goals
+- Detect `deleted` and `moved` events leaving the collection and treat them as removals in state/history.
+- Differentiate between moves within the collection (rename/update state) and those exiting the watched roots.
+- Provide opt-in safeguards (config/CLI) so destructive actions are explicit, auditable, and undo-aware.
+- Maintain JSON/summary parity with existing CLI output, reflecting deletion counts and error details.
+
+### Milestones
+1. **Event Taxonomy & Queue Plumbing**
+   - Extend `_WatchEventHandler` to capture delete/move events with both source/destination paths.
+   - Introduce a lightweight event model carrying `kind`, `src`, `dest`, and timestamps; update batching logic to group by root.
+   - Flag candidates that no longer exist or whose destinations are outside the root as removals before ingestion.
+
+2. **Planner & Executor Enhancements**
+   - Add `DeleteOperation` (and optional `MoveOperation` link) to organization models with serialization and history notes.
+   - Teach watch batch processing to emit delete operations (no ingestion/classification needed).
+   - Update `OperationExecutor`/state repo helpers so deletes drop `CollectionState` entries, append history events, and log tombstones.
+   - Ensure undo logic either reconstructs deletes from snapshots or clearly reports non-restorable operations.
+
+3. **CLI & Configuration**
+   - Introduce `processing.watch.allow_deletions` (default `false`) plus `--allow-deletions` flag to opt into destructive behavior.
+   - Expand `_emit_watch_batch` summaries/JSON schema with `deleted` counts and removal metadata.
+   - Emit actionable warnings in dry-run or when deletions are suppressed due to config.
+
+4. **Testing & Documentation**
+   - Add integration tests covering: delete, move-out, move-within, and rename scenarios (dry-run + destructive paths).
+   - Create targeted unit tests for `DeleteOperation`, history writes, and state persistence.
+   - Document workflow changes in README/SPEC, update AGENTS (watch + organization) with coordination notes, and capture safeguards in STATUS/IMPL logs.
+
+### Risks & Safeguards
+- Permanent deletion without recycle-bin integration; mitigate via config defaults, dry-run previews, and explicit confirmations.
+- Concurrency race conditions if files fluctuate during batching; rely on snapshot metadata and conservative error handling.
+- JSON consumers must tolerate new fields; version schema expectations in docs.
+
+### Next Steps
+- Prototype event classification (delete vs. internal move) with unit coverage.
+- Sketch `DeleteOperation` data model and extend executor/history flows.
+- Draft CLI UX (flags/messages) and circulate for review before wiring destructive behavior.
+
+
