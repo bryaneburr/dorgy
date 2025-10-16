@@ -15,6 +15,42 @@
 9. Phase 7 – Search & Metadata APIs: use chromadb collections to power semantic and tag/date filters, maintain FileRecord index on each organization run, and update entries when mv executes (with validation of destination).
 10. Phase 8 – Testing & Tooling: configure uv pip compile lock, add pre-commit (formatting, lint, import sort, pytest), implement unit/integration tests for pipeline stages and CLI workflows (including dry-run/undo), and document automation expectations in AGENTS plus SPEC alignment updates.
 
+## Phase 4.5 – CLI Polish & UX Scope
+
+1. Command Output Consistency
+   - Harmonize summary lines across `org`, `undo`, `status`, and future commands (consistent color, punctuation, pluralization).
+   - Introduce optional `--quiet/--summary` toggles to reduce noise for scripting.
+   - Ensure `org` reports destination root (especially when `--output` is used) and includes counts of renames/moves/conflicts in both text and JSON.
+
+2. JSON/Automation Enhancements
+   - Extend `org` execution path to support `--json` output mirroring dry-run payloads (final plan, state changes, history entry).
+   - Add JSON modes to other inspection commands as needed (e.g., `status --json` already implemented; revisit `search` and future commands).
+   - Standardize JSON error responses (e.g., `{"error": {"code": "...", "message": "...", "details": ...}}`).
+
+3. Error Handling Improvements
+   - Audit `click.ClickException` messaging for clarity and remediation hints (missing state, malformed history/snapshot, permission issues).
+   - Ensure structured JSON is returned when JSON flags are provided, even on failure (non-zero exit code with payload).
+   - Add validation for mutually exclusive flags or unsupported combinations with helpful errors.
+
+4. Configuration Integration
+   - Allow CLI options (e.g., `--history`, `--quiet`, potential future defaults) to fall back to configuration or env variables.
+   - Document new config keys in `SPEC.md`/`README.md`, update `ConfigManager` tests if defaults change.
+
+5. Testing & Documentation
+   - Expand CLI integration tests to cover new flags, quiet/summary modes, JSON error cases, and polished messaging.
+   - Update README “Current CLI Highlights” and examples to reflect refined outputs/flags.
+   - Note coordination expectations in `AGENTS.md` for consistent CLI UX and shared helper functions.
+
+## Risks & Open Questions
+- Need to balance richer output with backwards compatibility for existing scripts (decide default verbosity carefully).
+- JSON schema stability considerations for future tooling integration; may want to formalize schemas or versioning.
+- Additional flags/config may require reconciliation with upcoming watch/mv implementations.
+
+## Next Steps
+- Kick off Phase 5 watch service work on `feature/phase-5-watch`, focusing on event debouncing and safe reuse of the ingestion/organization pipeline.
+- Extend the polished CLI UX (summary helpers, JSON payloads, config defaults) to upcoming commands (`watch`, `mv`, `search`) as they come online.
+- Continue updating documentation/tests alongside new automation entry points to preserve deterministic behaviour before broader CLI rollout.
+
 ## Phase 5 – Watch Service Implementation Plan
 
 ### Goals
@@ -107,38 +143,4 @@
 - Sketch `DeleteOperation` data model and extend executor/history flows.
 - Draft CLI UX (flags/messages) and circulate for review before wiring destructive behavior.
 
-## Phase 4.5 – CLI Polish & UX Scope
 
-1. Command Output Consistency
-   - Harmonize summary lines across `org`, `undo`, `status`, and future commands (consistent color, punctuation, pluralization).
-   - Introduce optional `--quiet/--summary` toggles to reduce noise for scripting.
-   - Ensure `org` reports destination root (especially when `--output` is used) and includes counts of renames/moves/conflicts in both text and JSON.
-
-2. JSON/Automation Enhancements
-   - Extend `org` execution path to support `--json` output mirroring dry-run payloads (final plan, state changes, history entry).
-   - Add JSON modes to other inspection commands as needed (e.g., `status --json` already implemented; revisit `search` and future commands).
-   - Standardize JSON error responses (e.g., `{"error": {"code": "...", "message": "...", "details": ...}}`).
-
-3. Error Handling Improvements
-   - Audit `click.ClickException` messaging for clarity and remediation hints (missing state, malformed history/snapshot, permission issues).
-   - Ensure structured JSON is returned when JSON flags are provided, even on failure (non-zero exit code with payload).
-   - Add validation for mutually exclusive flags or unsupported combinations with helpful errors.
-
-4. Configuration Integration
-   - Allow CLI options (e.g., `--history`, `--quiet`, potential future defaults) to fall back to configuration or env variables.
-   - Document new config keys in `SPEC.md`/`README.md`, update `ConfigManager` tests if defaults change.
-
-5. Testing & Documentation
-   - Expand CLI integration tests to cover new flags, quiet/summary modes, JSON error cases, and polished messaging.
-   - Update README “Current CLI Highlights” and examples to reflect refined outputs/flags.
-   - Note coordination expectations in `AGENTS.md` for consistent CLI UX and shared helper functions.
-
-## Risks & Open Questions
-- Need to balance richer output with backwards compatibility for existing scripts (decide default verbosity carefully).
-- JSON schema stability considerations for future tooling integration; may want to formalize schemas or versioning.
-- Additional flags/config may require reconciliation with upcoming watch/mv implementations.
-
-## Next Steps
-- Kick off Phase 5 watch service work on `feature/phase-5-watch`, focusing on event debouncing and safe reuse of the ingestion/organization pipeline.
-- Extend the polished CLI UX (summary helpers, JSON payloads, config defaults) to upcoming commands (`watch`, `mv`, `search`) as they come online.
-- Continue updating documentation/tests alongside new automation entry points to preserve deterministic behaviour before broader CLI rollout.
