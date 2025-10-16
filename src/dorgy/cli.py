@@ -347,7 +347,15 @@ def org(
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    root = Path(path).expanduser().resolve()
+    source_root = Path(path).expanduser().resolve()
+    target_root = source_root
+    copy_mode = False
+    if output:
+        target_root = Path(output).expanduser().resolve()
+        if not dry_run:
+            target_root.mkdir(parents=True, exist_ok=True)
+        copy_mode = target_root != source_root
+
     recursive = recursive or config.processing.recurse_directories
     include_hidden = config.processing.process_hidden_files
     follow_symlinks = config.processing.follow_symlinks
@@ -361,7 +369,7 @@ def org(
         follow_symlinks=follow_symlinks,
         max_size_bytes=max_size_bytes,
     )
-    state_dir = Path(path).expanduser().resolve() / ".dorgy"
+    state_dir = target_root / ".dorgy"
     staging_dir = None if dry_run else state_dir / "staging"
     classification_cache = ClassificationCache(state_dir / "classifications.json")
 
@@ -375,11 +383,11 @@ def org(
         allow_writes=not dry_run,
     )
 
-    result = pipeline.run([root])
+    result = pipeline.run([source_root])
     classification_batch = _run_classification(
         result.processed,
         prompt,
-        root,
+        source_root,
         dry_run,
         config,
         classification_cache,
@@ -398,7 +406,7 @@ def org(
         descriptors=[descriptor for _, descriptor in paired],
         decisions=[decision for decision, _ in paired],
         rename_enabled=config.organization.rename_files,
-        root=root,
+        root=target_root,
         conflict_strategy=config.organization.conflict_resolution,
     )
     rename_map = {operation.source: operation.destination for operation in plan.renames}
@@ -424,7 +432,7 @@ def org(
             )
         console.print_json(data=payload)
     else:
-        table = Table(title=f"Organization preview for {root}")
+        table = Table(title=f"Organization preview for {target_root if copy_mode else source_root}")
         table.add_column("File", overflow="fold")
         table.add_column("Type")
         table.add_column("Size", justify="right")
@@ -433,7 +441,7 @@ def org(
         for decision, descriptor in paired:
             metadata = descriptor.metadata
             try:
-                relative_path = descriptor.path.relative_to(root)
+                relative_path = descriptor.path.relative_to(source_root)
             except ValueError:
                 relative_path = descriptor.path
             category = decision.primary_category if decision else "-"
@@ -490,7 +498,7 @@ def org(
         return
 
     repository = StateRepository()
-    state_dir = repository.initialize(root)
+    state_dir = repository.initialize(target_root)
     quarantine_dir = state_dir / "quarantine"
     if result.quarantined and config.processing.corrupted_files.action == "quarantine":
         moved_paths: list[Path] = []
@@ -511,21 +519,25 @@ def org(
         if moved_paths:
             console.print(f"[yellow]Moved {len(moved_paths)} files to quarantine.[/yellow]")
     try:
-        state = repository.load(root)
+        state = repository.load(target_root)
     except MissingStateError:
-        state = CollectionState(root=str(root))
+        state = CollectionState(root=str(target_root))
 
     snapshot: dict[str, Any] | None = None
     if not dry_run:
-        snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], root)
+        snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], source_root)
 
-    executor = OperationExecutor(staging_root=state_dir / "staging")
+    executor = OperationExecutor(
+        staging_root=state_dir / "staging",
+        copy_mode=copy_mode,
+        source_root=source_root,
+    )
     events: list[OperationEvent] = []
     if not dry_run:
         try:
             if snapshot is not None:
-                repository.write_original_structure(root, snapshot)
-            events = executor.apply(plan, root)
+                repository.write_original_structure(target_root, snapshot)
+            events = executor.apply(plan, target_root)
         except Exception as exc:
             raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
 
@@ -542,16 +554,18 @@ def org(
             descriptor.path = move_target
             descriptor.display_name = descriptor.path.name
 
-        record = _descriptor_to_record(descriptor, decision, root)
-        old_relative = _relative_to_collection(original_path, root)
+        record = _descriptor_to_record(descriptor, decision, target_root)
+        old_relative = _relative_to_collection(original_path, target_root)
 
         state.files.pop(old_relative, None)
         state.files[record.path] = record
 
-    repository.save(root, state)
+    repository.save(target_root, state)
     if events:
-        repository.append_history(root, events)
+        repository.append_history(target_root, events)
     console.print(f"[green]Persisted state for {len(result.processed)} files.[/green]")
+    if copy_mode and not dry_run:
+        console.print(f"[cyan]Copied organized files into {target_root} while preserving originals.[/cyan]")
 
     log_path = state_dir / "dorgy.log"
     try:

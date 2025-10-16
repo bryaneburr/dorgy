@@ -402,4 +402,5 @@ The project will progress through the following phases. Update the status column
 - Operation history is appended to `.dorgy/history.jsonl` capturing timestamps, pre/post paths, conflict metadata, and reasoning for every rename/move.
 - `orig.json` now stores per-run snapshots (`generated_at`, `entries`) based on ingestion descriptors, and `dorgy undo --dry-run` surfaces a preview of captured paths for rollback confirmation.
 - Executor stages file mutations in `.dorgy/staging/<session>` before committing renames/moves, providing automatic rollback if conflicts occur mid-plan.
+- `dorgy org --output PATH` copies organized files into the destination root (preserving originals), with state/history/logs stored under `PATH/.dorgy` so follow-up commands operate on the relocated collection.
 - Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.

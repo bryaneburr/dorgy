@@ -190,3 +190,32 @@ def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:
     assert "note.txt" in undo_result.output
     assert "Recent history" in undo_result.output
     assert "RENAME" in undo_result.output or "MOVE" in undo_result.output
+
+
+def test_cli_org_supports_output_relocation(tmp_path: Path) -> None:
+    """Organizing into an output directory should copy files into the new root."""
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    (source_root / "receipt.txt").write_text("paid", encoding="utf-8")
+
+    output_root = tmp_path / "organized"
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(
+        cli,
+        ["org", str(source_root), "--output", str(output_root)],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    final_path = output_root / "documents" / "receipt.txt"
+    assert final_path.exists()
+    # Originals remain when copying into an output directory.
+    assert (source_root / "receipt.txt").exists()
+    state_path = output_root / ".dorgy" / "state.json"
+    assert state_path.exists()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert "documents/receipt.txt" in state["files"]

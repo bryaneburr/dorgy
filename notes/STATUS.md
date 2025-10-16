@@ -53,3 +53,4 @@
 - Captured ingestion snapshots into `.dorgy/orig.json` before organization runs, exposed them through `dorgy undo --dry-run`, and expanded CLI/state tests to cover the snapshot schema.
 - Introduced staged execution for organization plans so renames/moves occur from `.dorgy/staging/<session>` with automatic rollback on failure; added regression tests covering successful runs and conflict restoration, then re-ran `uv run pytest` (40 passed, 1 skipped).
 - Surfaced recent `.dorgy/history.jsonl` entries during `dorgy undo --dry-run`, added repository helpers for reading history, and verified the output/limit logic with dedicated tests (41 passed, 1 skipped).
+- Implemented `dorgy org --output PATH` relocation by copying organized files into the target directory, preserving originals and persisting state/history under the destination `.dorgy`; updated CLI/executor to support copy-mode staging and added integration coverage.

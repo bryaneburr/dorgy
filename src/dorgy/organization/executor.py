@@ -26,9 +26,17 @@ class _StagedFile:
 class OperationExecutor:
     """Apply operation plans with staging and rollback support."""
 
-    def __init__(self, staging_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        staging_root: Path | None = None,
+        *,
+        copy_mode: bool = False,
+        source_root: Path | None = None,
+    ) -> None:
         self._last_plan: OperationPlan | None = None
         self._staging_root = staging_root
+        self._copy_mode = copy_mode
+        self._source_root = source_root.resolve() if source_root is not None else None
 
     def apply(
         self,
@@ -156,9 +164,18 @@ class OperationExecutor:
         stage_path.parent.mkdir(parents=True, exist_ok=True)
         if not source.exists():
             raise FileNotFoundError(f"Source path is missing: {source}")
-        if stage_path.exists():
-            raise FileExistsError(f"Staging path already exists: {stage_path}")
-        source.rename(stage_path)
+        counter = 1
+        candidate = stage_path
+        while candidate.exists():
+            candidate = stage_path.with_name(
+                f"{stage_path.stem}-{counter}{stage_path.suffix}"
+            )
+            counter += 1
+        stage_path = candidate
+        if self._copy_mode:
+            shutil.copy2(source, stage_path)
+        else:
+            source.rename(stage_path)
         return stage_path
 
     def _move_file(self, source: Path, destination: Path) -> None:
@@ -169,10 +186,15 @@ class OperationExecutor:
 
     def _restore_staged_files(self, staged_files: dict[Path, _StagedFile]) -> None:
         for entry in staged_files.values():
-            for candidate in [entry.current_location, entry.stage]:
-                if candidate.exists():
-                    candidate.rename(entry.original)
-                    break
+            if self._copy_mode:
+                for candidate in [entry.current_location, entry.stage]:
+                    if candidate.exists():
+                        candidate.unlink()
+            else:
+                for candidate in [entry.current_location, entry.stage]:
+                    if candidate.exists():
+                        candidate.rename(entry.original)
+                        break
 
     def _cleanup_session(self, session_dir: Path) -> None:
         if session_dir.exists():
@@ -191,8 +213,13 @@ class OperationExecutor:
     def _validate_path(self, source: Path, root: Path) -> None:
         if not source.exists():
             raise FileNotFoundError(f"Source path is missing: {source}")
-        if root not in source.parents and source != root:
-            raise ValueError(f"Source path {source} is outside collection root {root}")
+        roots = [root.resolve()]
+        if self._source_root is not None:
+            roots.append(self._source_root)
+        if not any(r in source.resolve().parents or source.resolve() == r for r in roots):
+            raise ValueError(
+                f"Source path {source} is outside managed roots: {', '.join(str(r) for r in roots)}"
+            )
 
     def _create_event(
         self,
