@@ -281,6 +281,7 @@ def test_cli_status_outputs_summary(tmp_path: Path) -> None:
     assert "Status for" in status_result.output
     assert "Files tracked" in status_result.output
     assert "Recent history" in status_result.output
+    assert "Status summary for" in status_result.output
 
 
 def test_cli_status_json(tmp_path: Path) -> None:
@@ -299,6 +300,98 @@ def test_cli_status_json(tmp_path: Path) -> None:
     status_result = runner.invoke(cli, ["status", str(root), "--json"], env=env)
     assert status_result.exit_code == 0
     payload = json.loads(status_result.output)
-    assert payload["files_tracked"] >= 1
+    assert payload["counts"]["files"] >= 1
     assert "history" in payload
     assert "snapshot" in payload
+
+
+def test_cli_org_summary_mode_outputs_summary_line(tmp_path: Path) -> None:
+    """Summary mode should surface only the final summary line."""
+
+    root = tmp_path / "summary-mode"
+    root.mkdir()
+    (root / "project.txt").write_text("notes", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["org", str(root), "--summary"], env=env)
+
+    assert result.exit_code == 0
+    assert "Organization summary for" in result.output
+    assert "Organization preview" not in result.output
+
+
+def test_cli_org_quiet_mode_is_silent(tmp_path: Path) -> None:
+    """Quiet mode should suppress non-error output."""
+
+    root = tmp_path / "quiet-mode"
+    root.mkdir()
+    (root / "report.txt").write_text("content", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["org", str(root), "--quiet"], env=env)
+
+    assert result.exit_code == 0
+    assert result.output.strip() == ""
+
+
+def test_cli_status_json_error_when_state_missing(tmp_path: Path) -> None:
+    """Status JSON should surface standardized error payloads when state is absent."""
+
+    root = tmp_path / "missing-status"
+    root.mkdir()
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["status", str(root), "--json"], env=env)
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "cli_error"
+    assert "No organization state" in payload["error"]["message"]
+
+
+def test_cli_undo_summary_mode(tmp_path: Path) -> None:
+    """Undo summary mode should emit only the summary line."""
+
+    root = tmp_path / "undo-summary"
+    root.mkdir()
+    (root / "draft.txt").write_text("text", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    undo_result = runner.invoke(cli, ["undo", str(root), "--summary"], env=env)
+
+    assert undo_result.exit_code == 0
+    assert "Undo summary for" in undo_result.output
+    assert "Rolled back" not in undo_result.output
+
+
+def test_cli_status_respects_quiet_default(tmp_path: Path) -> None:
+    """Status command should honor the CLI quiet default from configuration."""
+
+    root = tmp_path / "quiet-default"
+    root.mkdir()
+    (root / "doc.txt").write_text("text", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.write_text("cli:\n  quiet_default: true\n", encoding="utf-8")
+
+    status_result = runner.invoke(cli, ["status", str(root)], env=env)
+
+    assert status_result.exit_code == 0
+    assert status_result.output.strip() == ""

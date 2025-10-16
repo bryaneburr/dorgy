@@ -6,6 +6,7 @@
 - Configure and run pre-commit hooks before every push; hooks must format, lint, sort imports, and execute the Python test suite when source files change.
 - Document any automation-facing behaviors or integration points directly in the relevant module's AGENTS.md file.
 - Provide detailed Google-style docstrings for every Python module, class, and function; update existing docstrings when behavior or signatures change.
+- CLI commands share summary/quiet helpers and standardized JSON error payloads; extend those utilities when adding new commands and update tests accordingly.
 
 ## Tracking & Coordination
 

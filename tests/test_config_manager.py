@@ -66,12 +66,18 @@ def test_resolve_with_precedence_respects_order(
     env = {"DORGY__LLM__TEMPERATURE": "0.7"}
     cli = {"llm.temperature": 0.2}
 
-    config = manager.load(cli_overrides=cli, env_overrides=env)
+    cli_overrides = {
+        "llm.temperature": 0.2,
+        "cli.quiet_default": True,
+    }
+
+    config = manager.load(cli_overrides=cli_overrides, env_overrides=env)
 
     assert config.llm.model == "gpt-4"
     assert config.processing.max_file_size_mb == 64
     # CLI overrides take precedence over environment
     assert config.llm.temperature == pytest.approx(0.2)
+    assert config.cli.quiet_default is True
 
 
 def test_invalid_yaml_raises_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +102,9 @@ def test_flatten_for_env_round_trips_defaults() -> None:
 
     assert flat["DORGY__LLM__PROVIDER"] == "local"
     assert flat["DORGY__PROCESSING__MAX_FILE_SIZE_MB"] == "100"
+    assert flat["DORGY__CLI__QUIET_DEFAULT"] == "False"
+    assert flat["DORGY__CLI__SUMMARY_DEFAULT"] == "False"
+    assert flat["DORGY__CLI__STATUS_HISTORY_LIMIT"] == "5"
 
 
 def test_resolve_with_precedence_invalid_value_raises() -> None:
