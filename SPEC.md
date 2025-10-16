@@ -289,8 +289,8 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 0 – Project Foundations | Scaffold `dorgy` package, Click entrypoint, `pyproject.toml` configured for `uv`, baseline docs (`README.md`, `AGENTS.md`) - CLI skeleton + pre-commit baseline + config/state scaffolding |
 | [x] | Phase 1 – Config & State | Pydantic-backed config loader/writer targeting `~/.dorgy/config.yaml`, flag/env overrides, shared helpers – config CLI + state repository persistence |
 | [x] | Phase 2 – Content Ingestion | File discovery with recursion/filters, adapters for `python-magic`, `Pillow`, `docling`, error channels |
-| [~] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
-| [ ] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
+| [x] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
+| [x] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
@@ -396,3 +396,13 @@ The project will progress through the following phases. Update the status column
 - Interfaces/classes with `NotImplementedError` placeholders for discovery, detection, and extraction behaviors.
 - Tests confirming scaffolding entry points exist and raise `NotImplementedError` where implementation will follow.
 - Documentation updates (README/AGENTS) highlighting ingestion pipeline layout and configuration touchpoints.
+
+### Progress Summary
+- Conflict resolution respects `organization.conflict_resolution` (append_number, timestamp, skip), and rename/move operations surface plan notes describing how collisions were handled; moves still place files into category folders derived from classification decisions.
+- Operation history is appended to `.dorgy/history.jsonl` capturing timestamps, pre/post paths, conflict metadata, and reasoning for every rename/move.
+- `orig.json` now stores per-run snapshots (`generated_at`, `entries`) based on ingestion descriptors, and `dorgy undo --dry-run` surfaces a preview of captured paths for rollback confirmation.
+- Executor stages file mutations in `.dorgy/staging/<session>` before committing renames/moves, providing automatic rollback if conflicts occur mid-plan.
+- `dorgy org --output PATH` copies organized files into the destination root (preserving originals), with state/history/logs stored under `PATH/.dorgy` so follow-up commands operate on the relocated collection.
+- `dorgy undo` supports `--json` preview and execution output, exposing plan/snapshot/history details for tooling integrations.
+- `dorgy status` reports collection summaries (state counts, recent history, snapshot metadata) in both text and JSON formats for inspection.
+- Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.

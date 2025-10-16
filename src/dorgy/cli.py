@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,7 +27,16 @@ from dorgy.ingestion import FileDescriptor, IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
-from dorgy.state import CollectionState, FileRecord, MissingStateError, StateRepository
+from dorgy.organization.executor import OperationExecutor
+from dorgy.organization.planner import OrganizerPlanner
+from dorgy.state import (
+    CollectionState,
+    FileRecord,
+    MissingStateError,
+    OperationEvent,
+    StateError,
+    StateRepository,
+)
 
 console = Console()
 
@@ -228,6 +238,37 @@ def _relative_to_collection(path: Path, root: Path) -> str:
         return str(path)
 
 
+def _build_original_snapshot(
+    descriptors: Iterable[FileDescriptor],
+    root: Path,
+) -> dict[str, Any]:
+    """Create a snapshot describing the pre-organization file structure.
+
+    Args:
+        descriptors: File descriptors produced before any moves/renames.
+        root: Collection root path used to compute relative paths.
+
+    Returns:
+        dict[str, Any]: Snapshot payload ready to persist via the state repository.
+    """
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    entries: list[dict[str, Any]] = []
+    for descriptor in descriptors:
+        entries.append(
+            {
+                "path": _relative_to_collection(descriptor.path, root),
+                "display_name": descriptor.display_name,
+                "mime_type": descriptor.mime_type,
+                "hash": descriptor.hash,
+                "size_bytes": descriptor.metadata.get("size_bytes"),
+                "tags": list(descriptor.tags),
+            }
+        )
+
+    return {"generated_at": generated_at, "entries": entries}
+
+
 def _decision_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
     """Compute a stable cache key for a descriptor."""
 
@@ -256,6 +297,15 @@ def _apply_rename(path: Path, suggestion: str) -> Path:
 
     path.rename(candidate)
     return candidate
+
+
+def _format_history_event(event: OperationEvent) -> str:
+    notes = ", ".join(event.notes) if event.notes else ""
+    note_suffix = f" — {notes}" if notes else ""
+    return (
+        f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
+        f"{event.source} -> {event.destination}{note_suffix}"
+    )
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -307,7 +357,15 @@ def org(
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    root = Path(path).expanduser().resolve()
+    source_root = Path(path).expanduser().resolve()
+    target_root = source_root
+    copy_mode = False
+    if output:
+        target_root = Path(output).expanduser().resolve()
+        if not dry_run:
+            target_root.mkdir(parents=True, exist_ok=True)
+        copy_mode = target_root != source_root
+
     recursive = recursive or config.processing.recurse_directories
     include_hidden = config.processing.process_hidden_files
     follow_symlinks = config.processing.follow_symlinks
@@ -321,7 +379,7 @@ def org(
         follow_symlinks=follow_symlinks,
         max_size_bytes=max_size_bytes,
     )
-    state_dir = Path(path).expanduser().resolve() / ".dorgy"
+    state_dir = target_root / ".dorgy"
     staging_dir = None if dry_run else state_dir / "staging"
     classification_cache = ClassificationCache(state_dir / "classifications.json")
 
@@ -335,11 +393,11 @@ def org(
         allow_writes=not dry_run,
     )
 
-    result = pipeline.run([root])
+    result = pipeline.run([source_root])
     classification_batch = _run_classification(
         result.processed,
         prompt,
-        root,
+        source_root,
         dry_run,
         config,
         classification_cache,
@@ -353,20 +411,38 @@ def org(
             if descriptor.path not in result.needs_review:
                 result.needs_review.append(descriptor.path)
 
+    planner = OrganizerPlanner()
+    plan = planner.build_plan(
+        descriptors=[descriptor for _, descriptor in paired],
+        decisions=[decision for decision, _ in paired],
+        rename_enabled=config.organization.rename_files,
+        root=target_root,
+        conflict_strategy=config.organization.conflict_resolution,
+    )
+    rename_map = {operation.source: operation.destination for operation in plan.renames}
+    move_map = {operation.source: operation.destination for operation in plan.moves}
+
     if json_output:
         payload = []
         for decision, descriptor in paired:
+            rename_target = rename_map.get(descriptor.path)
+            move_key = rename_target if rename_target is not None else descriptor.path
+            move_target = move_map.get(move_key)
             payload.append(
                 {
                     "descriptor": descriptor.model_dump(mode="python"),
                     "classification": decision.model_dump(mode="python")
                     if decision is not None
                     else None,
+                    "operations": {
+                        "rename": rename_target.as_posix() if rename_target is not None else None,
+                        "move": move_target.as_posix() if move_target is not None else None,
+                    },
                 }
             )
         console.print_json(data=payload)
     else:
-        table = Table(title=f"Organization preview for {root}")
+        table = Table(title=f"Organization preview for {target_root if copy_mode else source_root}")
         table.add_column("File", overflow="fold")
         table.add_column("Type")
         table.add_column("Size", justify="right")
@@ -375,7 +451,7 @@ def org(
         for decision, descriptor in paired:
             metadata = descriptor.metadata
             try:
-                relative_path = descriptor.path.relative_to(root)
+                relative_path = descriptor.path.relative_to(source_root)
             except ValueError:
                 relative_path = descriptor.path
             category = decision.primary_category if decision else "-"
@@ -405,6 +481,10 @@ def org(
                 f"[green]Classification completed ({len(classification_batch.decisions)} files, "
                 f"{review_count} marked for review).[/green]"
             )
+        if plan.renames:
+            console.print(f"[cyan]{len(plan.renames)} rename operations planned/applied.[/cyan]")
+        if plan.moves:
+            console.print(f"[cyan]{len(plan.moves)} move operations planned/applied.[/cyan]")
         if prompt:
             console.print(
                 "[yellow]Prompt support arrives with the Phase 3 classification workflow.[/yellow]"
@@ -413,6 +493,10 @@ def org(
             console.print(
                 "[yellow]Output path support is coming soon; files stay in place for now.[/yellow]"
             )
+        if plan.notes:
+            console.print("[yellow]Plan notes:[/yellow]")
+            for note in plan.notes:
+                console.print(f"  - {note}")
         combined_errors = [*result.errors, *classification_batch.errors]
         if combined_errors:
             console.print("[red]Errors:[/red]")
@@ -424,7 +508,7 @@ def org(
         return
 
     repository = StateRepository()
-    state_dir = repository.initialize(root)
+    state_dir = repository.initialize(target_root)
     quarantine_dir = state_dir / "quarantine"
     if result.quarantined and config.processing.corrupted_files.action == "quarantine":
         moved_paths: list[Path] = []
@@ -445,29 +529,53 @@ def org(
         if moved_paths:
             console.print(f"[yellow]Moved {len(moved_paths)} files to quarantine.[/yellow]")
     try:
-        state = repository.load(root)
+        state = repository.load(target_root)
     except MissingStateError:
-        state = CollectionState(root=str(root))
+        state = CollectionState(root=str(target_root))
+
+    snapshot: dict[str, Any] | None = None
+    if not dry_run:
+        snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], source_root)
+
+    executor = OperationExecutor(
+        staging_root=state_dir / "staging",
+        copy_mode=copy_mode,
+        source_root=source_root,
+    )
+    events: list[OperationEvent] = []
+    if not dry_run:
+        try:
+            if snapshot is not None:
+                repository.write_original_structure(target_root, snapshot)
+            events = executor.apply(plan, target_root)
+        except Exception as exc:
+            raise click.ClickException(f"Failed to apply organization plan: {exc}") from exc
 
     for decision, descriptor in paired:
-        record = _descriptor_to_record(descriptor, decision, root)
-        old_relative = _relative_to_collection(descriptor.path, root)
+        original_path = descriptor.path
 
-        if (
-            not dry_run
-            and config.organization.rename_files
-            and decision is not None
-            and decision.rename_suggestion
-        ):
-            descriptor.path = _apply_rename(descriptor.path, decision.rename_suggestion)
+        rename_target = rename_map.get(original_path)
+        if rename_target is not None:
+            descriptor.path = rename_target
             descriptor.display_name = descriptor.path.name
-            record.path = _relative_to_collection(descriptor.path, root)
+
+        move_target = move_map.get(descriptor.path)
+        if move_target is not None:
+            descriptor.path = move_target
+            descriptor.display_name = descriptor.path.name
+
+        record = _descriptor_to_record(descriptor, decision, target_root)
+        old_relative = _relative_to_collection(original_path, target_root)
 
         state.files.pop(old_relative, None)
         state.files[record.path] = record
 
-    repository.save(root, state)
+    repository.save(target_root, state)
+    if events:
+        repository.append_history(target_root, events)
     console.print(f"[green]Persisted state for {len(result.processed)} files.[/green]")
+    if copy_mode and not dry_run:
+        console.print(f"[cyan]Copied organized files into {target_root} while preserving originals.[/cyan]")
 
     log_path = state_dir / "dorgy.log"
     try:
@@ -479,6 +587,7 @@ def org(
                 f"quarantined={len(result.quarantined)} "
                 f"classification={len(classification_batch.decisions)} "
                 f"classification_errors={len(classification_batch.errors)} "
+                f"renames={len(plan.renames)} moves={len(plan.moves)} "
                 f"errors={len(result.errors)}\n"
             )
             for error in result.errors:
@@ -487,6 +596,10 @@ def org(
                 log_file.write(f"  classification_error: {error}\n")
             for q_path in result.quarantined:
                 log_file.write(f"  quarantined: {q_path}\n")
+            for rename_op in plan.renames:
+                log_file.write(f"  rename: {rename_op.source} -> {rename_op.destination}\n")
+            for move_op in plan.moves:
+                log_file.write(f"  move: {move_op.source} -> {move_op.destination}\n")
     except OSError as exc:  # pragma: no cover - logging best effort
         console.print(f"[yellow]Unable to update log file: {exc}[/yellow]")
 
@@ -674,16 +787,265 @@ def mv(**_: object) -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-def undo(**_: object) -> None:
-    """Restore a collection to its original structure.
+@click.option("--json", "json_output", is_flag=True, help="Emit status information as JSON.")
+@click.option(
+    "--history",
+    "history_limit",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Number of recent history entries to include.",
+)
+def status(path: str, json_output: bool, history_limit: int) -> None:
+    """Display a summary of the collection state for PATH."""
 
-    Args:
-        _: Placeholder for Click-injected keyword arguments.
+    root = Path(path).expanduser().resolve()
+    repository = StateRepository()
 
-    Returns:
-        None: This function is invoked for its side effects.
-    """
-    _not_implemented("dorgy undo")
+    try:
+        state = repository.load(root)
+    except MissingStateError as exc:
+        raise click.ClickException(f"No organization state found for {root}: {exc}") from exc
+
+    files_total = len(state.files)
+    needs_review_count = sum(1 for record in state.files.values() if record.needs_review)
+    tagged_count = sum(1 for record in state.files.values() if record.tags)
+
+    snapshot_payload: dict[str, Any] | None = None
+    snapshot_error = None
+    try:
+        snapshot_payload = repository.load_original_structure(root)
+    except StateError as exc:
+        snapshot_error = str(exc)
+
+    history_error = None
+    history_limit = max(0, history_limit)
+    history_events: list[OperationEvent] = []
+    if history_limit > 0:
+        try:
+            history_events = repository.read_history(root, limit=history_limit)
+        except StateError as exc:
+            history_error = str(exc)
+
+    plan_summary: dict[str, Any] | None = None
+    plan_error = None
+    plan_path = root / ".dorgy" / "last_plan.json"
+    if plan_path.exists():
+        try:
+            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan_summary = {
+                "renames": len(plan_data.get("renames", [])),
+                "moves": len(plan_data.get("moves", [])),
+                "metadata_updates": len(plan_data.get("metadata_updates", [])),
+            }
+        except json.JSONDecodeError as exc:
+            plan_error = str(exc)
+
+    needs_review_dir = root / ".dorgy" / "needs-review"
+    review_entries = (
+        sorted(path.name for path in needs_review_dir.iterdir())
+        if needs_review_dir.exists()
+        else []
+    )
+
+    quarantine_dir = root / ".dorgy" / "quarantine"
+    quarantine_entries = (
+        sorted(path.name for path in quarantine_dir.iterdir())
+        if quarantine_dir.exists()
+        else []
+    )
+
+    state_summary = {
+        "root": str(root),
+        "created_at": state.created_at.isoformat(),
+        "updated_at": state.updated_at.isoformat(),
+        "files_tracked": files_total,
+        "needs_review": needs_review_count,
+        "tagged": tagged_count,
+        "directory_counts": {
+            "needs_review": len(review_entries),
+            "quarantine": len(quarantine_entries),
+        },
+        "plan": plan_summary,
+        "history": [event.model_dump(mode="json") for event in history_events],
+    }
+
+    if json_output:
+        payload = {
+            **state_summary,
+            "snapshot": snapshot_payload,
+            "errors": {},
+            "directories": {
+                "needs_review": review_entries[:5],
+                "quarantine": quarantine_entries[:5],
+            },
+        }
+        if snapshot_error:
+            payload["errors"]["snapshot"] = snapshot_error
+        if history_error:
+            payload["errors"]["history"] = history_error
+        if plan_error:
+            payload["errors"]["last_plan"] = plan_error
+        console.print_json(data=payload)
+        return
+
+    table = Table(title=f"Status for {root}")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Files tracked", str(files_total))
+    table.add_row("Needs review (state)", str(needs_review_count))
+    table.add_row("Tagged files", str(tagged_count))
+    table.add_row("Created", state.created_at.isoformat())
+    table.add_row("Last updated", state.updated_at.isoformat())
+    table.add_row("Needs-review dir entries", str(len(review_entries)))
+    table.add_row("Quarantine dir entries", str(len(quarantine_entries)))
+    if plan_summary is not None:
+        table.add_row("Last plan renames", str(plan_summary.get("renames", 0)))
+        table.add_row("Last plan moves", str(plan_summary.get("moves", 0)))
+        table.add_row("Last plan metadata updates", str(plan_summary.get("metadata_updates", 0)))
+    elif plan_error:
+        table.add_row("Last plan", f"Error: {plan_error}")
+    console.print(table)
+
+    if snapshot_payload:
+        generated_at = snapshot_payload.get("generated_at", "unknown")
+        entry_count = len(snapshot_payload.get("entries", []))
+        console.print(
+            f"[cyan]Snapshot generated at {generated_at} with {entry_count} entries.[/cyan]"
+        )
+    elif snapshot_error:
+        console.print(f"[yellow]Unable to load snapshot: {snapshot_error}[/yellow]")
+
+    if review_entries:
+        preview = review_entries[:5]
+        console.print("[yellow]Needs-review directory samples:[/yellow]")
+        for entry in preview:
+            console.print(f"  - {entry}")
+
+    if quarantine_entries:
+        preview = quarantine_entries[:5]
+        console.print("[yellow]Quarantine directory samples:[/yellow]")
+        for entry in preview:
+            console.print(f"  - {entry}")
+
+    if history_events:
+        console.print(
+            f"[green]Recent history ({len(history_events)} entries, newest first):[/green]"
+        )
+        for event in history_events:
+            console.print(f"  - {_format_history_event(event)}")
+    elif history_error:
+        console.print(f"[yellow]Unable to read history log: {history_error}[/yellow]")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
+@click.option("--dry-run", is_flag=True, help="Preview rollback without applying it.")
+@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing the rollback plan.")
+def undo(path: str, dry_run: bool, json_output: bool) -> None:
+    """Rollback the last organization plan applied to PATH."""
+
+    root = Path(path).expanduser().resolve()
+    repository = StateRepository()
+    executor = OperationExecutor(staging_root=root / ".dorgy" / "staging")
+
+    try:
+        state = repository.load(root)
+    except MissingStateError as exc:
+        raise click.ClickException(f"No organization state found for {root}: {exc}") from exc
+
+    plan = executor._load_plan(root)  # type: ignore[attr-defined]
+    plan_summary = {
+        "renames": [op.model_dump(mode="json") for op in plan.renames] if plan else [],
+        "moves": [op.model_dump(mode="json") for op in plan.moves] if plan else [],
+    } if plan else None
+
+    snapshot_payload: dict[str, Any] | None = None
+    try:
+        snapshot_payload = repository.load_original_structure(root)
+    except StateError as exc:
+        snapshot_error = str(exc)
+        snapshot_payload = None
+    else:
+        snapshot_error = None
+
+    history_error = None
+    try:
+        history_events = repository.read_history(root, limit=5)
+    except StateError as exc:
+        history_events = []
+        history_error = str(exc)
+
+    if dry_run:
+        if json_output:
+            payload: dict[str, Any] = {
+                "root": str(root),
+                "plan": plan_summary,
+                "snapshot": snapshot_payload,
+        "history": [event.model_dump(mode="json") for event in history_events],
+                "errors": {},
+            }
+            if plan is None:
+                payload["plan"] = None
+            if snapshot_error:
+                payload["errors"]["snapshot"] = snapshot_error
+            if history_error:
+                payload["errors"]["history"] = history_error
+            console.print_json(data=payload)
+            return
+
+        console.print("[yellow]Dry run: organization rollback simulated.[/yellow]")
+        if plan is None:
+            console.print("[yellow]No plan available to roll back.[/yellow]")
+        else:
+            console.print(
+                "[yellow]Plan contains "
+                f"{len(plan.renames)} renames and {len(plan.moves)} moves.[/yellow]"
+            )
+        if snapshot_payload:
+            entries = snapshot_payload.get("entries", [])
+            console.print(
+                f"[yellow]Snapshot captured {len(entries)} original entries before organization.[/yellow]"
+            )
+            preview = [entry.get("path", "?") for entry in entries[:5]]
+            if preview:
+                console.print("[yellow]Sample paths:[/yellow]")
+                for sample in preview:
+                    console.print(f"  - {sample}")
+        elif snapshot_error:
+            console.print(f"[yellow]Unable to load original snapshot: {snapshot_error}[/yellow]")
+        if history_events:
+            console.print(
+                f"[yellow]Recent history ({len(history_events)} entries, newest first):[/yellow]"
+            )
+            for event in history_events:
+                notes = ", ".join(event.notes) if event.notes else ""
+                note_suffix = f" — {notes}" if notes else ""
+                console.print(
+                    "  - "
+                    f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
+                    f"{event.source} -> {event.destination}{note_suffix}"
+                )
+        elif history_error:
+            console.print(f"[yellow]Unable to read history log: {history_error}[/yellow]")
+        return
+
+    try:
+        executor.rollback(root)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    repository.save(root, state)
+    if json_output:
+        payload = {
+            "root": str(root),
+            "rolled_back": True,
+            "plan": plan_summary,
+            "history": [event.model_dump(mode="json") for event in history_events],
+        }
+        console.print_json(data=payload)
+    else:
+        console.print(f"[green]Rolled back last plan for {root}.[/green]")
 
 
 def main() -> None:

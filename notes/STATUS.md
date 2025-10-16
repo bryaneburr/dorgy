@@ -34,8 +34,25 @@
 - Implemented heuristic classification fallback, CLI integration (including rename toggle support), state persistence of decisions, and coverage for new behaviours.
 - Added JSON-backed classification cache, confidence-based review routing, and optional DSPy activation via `DORGY_ENABLE_DSPY`.
 
+## 2025-10-18
+- Began Phase 4 organization engine: planner/executor scaffolding, rename conflict resolution, category-based moves, and undo/logging (`last_plan.json`).
+- CLI `org` now previews/applies rename+move operations and logs details to `.dorgy/dorgy.log`.
+
 ## 2025-10-16 (cont.)
 - Replaced all Python module/class/function docstrings with Google-style format across src/ and tests/ to standardize documentation quality.
 - Updated `AGENTS.md` directives to mandate Google-style docstrings for future contributions.
 - Ran `uv run pre-commit run --all-files` to validate formatting, linting, and tests prior to push.
 - Next actions: audit SPEC.md for any docstring-related expectations that should be surfaced in upcoming phases.
+
+## 2025-10-19
+- Extended the organization planner to honour `organization.conflict_resolution` (append_number, timestamp, skip) with timestamp injection for tests and surfaced `plan.notes` through the CLI.
+- Added timestamp/skip collision coverage to `tests/test_organization_scaffolding.py`, updated SPEC and organization AGENTS guidance, and confirmed behaviour via `uv run pytest`.
+- Observed test suite summary: 37 passed, 1 skipped (DSPy optional dependency).
+- Next actions: wire history playback into undo/status commands and outline transactional staging requirements before expanding to watch/mv integration for Phase 5.
+- Persisted rename/move history events to `.dorgy/history.jsonl`, exposed `OperationEvent` models, and wired `StateRepository.append_history` with executor-generated records. Updated state tests/docs accordingly and re-ran `uv run pytest` (38 passed, 1 skipped) to verify the new logging.
+- Captured ingestion snapshots into `.dorgy/orig.json` before organization runs, exposed them through `dorgy undo --dry-run`, and expanded CLI/state tests to cover the snapshot schema.
+- Introduced staged execution for organization plans so renames/moves occur from `.dorgy/staging/<session>` with automatic rollback on failure; added regression tests covering successful runs and conflict restoration, then re-ran `uv run pytest` (40 passed, 1 skipped).
+- Surfaced recent `.dorgy/history.jsonl` entries during `dorgy undo --dry-run`, added repository helpers for reading history, and verified the output/limit logic with dedicated tests (41 passed, 1 skipped).
+- Implemented `dorgy org --output PATH` relocation by copying organized files into the target directory, preserving originals and persisting state/history under the destination `.dorgy`; updated CLI/executor to support copy-mode staging and added integration coverage.
+- Added `dorgy undo --json` for machine-readable rollback previews/results, serialising plans, snapshots, and recent history; expanded CLI tests to assert JSON payload shape (43 passed, 1 skipped).
+- Introduced `dorgy status` for read-only collection summaries (text/JSON) leveraging state, history, and snapshot metadata; documented the command and validated output via new CLI tests (46 passed, 1 skipped).

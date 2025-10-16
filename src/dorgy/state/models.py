@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,28 @@ class FileRecord(BaseModel):
     needs_review: bool = False
 
 
+class OperationEvent(BaseModel):
+    """History entry describing a single organization operation.
+
+    Attributes:
+        timestamp: Moment the operation executed.
+        operation: Operation type identifier (rename or move).
+        source: Original path for the entry (relative to the collection when possible).
+        destination: Path after applying the operation.
+        conflict_strategy: Conflict policy applied while executing the operation.
+        conflict_applied: Indicates whether a conflict was encountered.
+        notes: Optional freeform notes about the event.
+    """
+
+    timestamp: datetime
+    operation: Literal["rename", "move"]
+    source: str
+    destination: str
+    conflict_strategy: Optional[str] = None
+    conflict_applied: bool = False
+    notes: List[str] = Field(default_factory=list)
+
+
 class CollectionState(BaseModel):
     """Aggregate metadata for an organized directory.
 
@@ -50,4 +72,4 @@ class CollectionState(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-__all__ = ["FileRecord", "CollectionState"]
+__all__ = ["FileRecord", "CollectionState", "OperationEvent"]

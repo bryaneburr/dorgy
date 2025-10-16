@@ -30,6 +30,24 @@ uv run dorgy config set llm.temperature --value 0.25
 
 Refer to `AGENTS.md` for automation guidelines and team coordination expectations.
 
+### Current CLI Highlights
+
+```bash
+# Organize a directory in place
+uv run dorgy org ./documents
+
+# Organize into a separate output directory (preserves originals)
+uv run dorgy org ./inbox --output ./organized
+
+# Preview undo information (text or JSON)
+uv run dorgy undo ./documents --dry-run
+uv run dorgy undo ./documents --dry-run --json
+
+# Inspect collection status and recent history
+uv run dorgy status ./documents
+uv run dorgy status ./documents --json
+```
+
 ### Configuration Notes
 
 - Configuration lives at `~/.dorgy/config.yaml`. Run `uv run dorgy config view` to inspect the effective settings (including environment overrides).
@@ -38,3 +56,4 @@ Refer to `AGENTS.md` for automation guidelines and team coordination expectation
 - Locked/corrupted file handling is governed by `processing.locked_files` and `processing.corrupted_files`; use `copy|skip|wait` or `quarantine|skip` to steer ingestion behaviour.
 - Automatic renaming can be toggled with `organization.rename_files`; set to `false` to keep original filenames while still recording suggestions in state.
 - Classification runs locally using heuristics by default; set `DORGY_ENABLE_DSPY=1` (with DSPy installed/configured) to enable LLM-backed classification and rename suggestions.
+- Organized files are relocated into category folders derived from classification decisions (e.g., `Documents/`); undo data is captured in `.dorgy/last_plan.json` and `dorgy.log`.
