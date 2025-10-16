@@ -53,6 +53,10 @@ uv run dorgy status ./documents --quiet
 
 # Emit machine-readable execution payloads
 uv run dorgy org ./documents --json
+
+# Monitor directories once or continuously
+uv run dorgy watch ./inbox --once
+uv run dorgy watch ./inbox --debounce 1.5 --json
 ```
 
 ### Configuration Notes
@@ -65,3 +69,4 @@ uv run dorgy org ./documents --json
 - Classification runs locally using heuristics by default; set `DORGY_ENABLE_DSPY=1` (with DSPy installed/configured) to enable LLM-backed classification and rename suggestions.
 - Organized files are relocated into category folders derived from classification decisions (e.g., `Documents/`); undo data is captured in `.dorgy/last_plan.json` and `dorgy.log`.
 - Use the `cli` section to control verbosity defaults (`quiet_default`, `summary_default`) and the default status history limit; environment overrides follow `DORGY__CLI__QUIET_DEFAULT`, etc.
+- Configure watch behaviour under `processing.watch` (debounce, batch sizing, error backoff) to match your filesystem activity profile before running `dorgy watch`.

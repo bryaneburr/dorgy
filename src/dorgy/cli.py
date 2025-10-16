@@ -7,8 +7,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from itertools import chain
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 import click
 import yaml
@@ -17,12 +16,15 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.table import Table
 
-from dorgy.classification import (
-    ClassificationBatch,
-    ClassificationCache,
-    ClassificationDecision,
-    ClassificationEngine,
-    ClassificationRequest,
+from dorgy.classification import ClassificationCache
+from dorgy.cli_support import (
+    build_original_snapshot,
+    collect_error_payload,
+    compute_org_counts,
+    descriptor_to_record,
+    relative_to_collection,
+    run_classification,
+    zip_decisions,
 )
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
 from dorgy.ingestion import FileDescriptor, IngestionPipeline
@@ -30,16 +32,9 @@ from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
 from dorgy.organization.executor import OperationExecutor
-from dorgy.organization.models import OperationPlan
 from dorgy.organization.planner import OrganizerPlanner
-from dorgy.state import (
-    CollectionState,
-    FileRecord,
-    MissingStateError,
-    OperationEvent,
-    StateError,
-    StateRepository,
-)
+from dorgy.state import CollectionState, MissingStateError, OperationEvent, StateError, StateRepository
+from dorgy.watch import WatchBatchResult, WatchService
 
 console = Console()
 
@@ -116,62 +111,6 @@ def _format_summary_line(command: str, root: Path | str, metrics: dict[str, Any]
     return f"[green]{command} summary for {formatted_root}: {parts}.[/green]"
 
 
-def _compute_org_counts(
-    result: Any,
-    classification_batch: ClassificationBatch,
-    plan: OperationPlan,
-) -> dict[str, int]:
-    """Compute organization-related counts for reporting and JSON payloads.
-
-    Args:
-        result: Ingestion pipeline result containing processed paths.
-        classification_batch: Batch result from the classification engine.
-        plan: Operation plan containing renames, moves, and metadata updates.
-
-    Returns:
-        dict[str, int]: Mapping of count names to integer values.
-    """
-
-    ingestion_errors = len(result.errors)
-    classification_errors = len(classification_batch.errors)
-    conflict_count = sum(
-        1 for operation in chain(plan.renames, plan.moves) if operation.conflict_applied
-    )
-
-    return {
-        "processed": len(result.processed),
-        "needs_review": len(result.needs_review),
-        "quarantined": len(result.quarantined),
-        "renames": len(plan.renames),
-        "moves": len(plan.moves),
-        "metadata_updates": len(plan.metadata_updates),
-        "conflicts": conflict_count,
-        "ingestion_errors": ingestion_errors,
-        "classification_errors": classification_errors,
-        "errors": ingestion_errors + classification_errors,
-    }
-
-
-def _collect_error_payload(
-    result: Any,
-    classification_batch: ClassificationBatch,
-) -> dict[str, list[str]]:
-    """Return structured error lists for ingestion and classification phases.
-
-    Args:
-        result: Ingestion pipeline result containing error details.
-        classification_batch: Classification batch containing error details.
-
-    Returns:
-        dict[str, list[str]]: Mapping of error categories to string lists.
-    """
-
-    return {
-        "ingestion": list(result.errors),
-        "classification": list(classification_batch.errors),
-    }
-
-
 def _emit_errors(
     errors: dict[str, list[str]],
     *,
@@ -198,6 +137,83 @@ def _emit_errors(
     )
     for entry in combined:
         _emit_message(f"  - {entry}", mode="error", quiet=quiet, summary_only=summary_only)
+
+
+def _emit_watch_batch(
+    batch: WatchBatchResult,
+    *,
+    json_output: bool,
+    quiet: bool,
+    summary_only: bool,
+) -> None:
+    """Render output for a processed watch batch."""
+
+    if json_output:
+        console.print_json(data=batch.json_payload)
+        return
+
+    trigger_count = len(batch.triggered_paths)
+    if trigger_count and not summary_only:
+        _emit_message(
+            f"[cyan]Watch batch {batch.json_payload['context']['batch_id']} "
+            f"processed {trigger_count} triggered path(s).[/cyan]",
+            mode="detail",
+            quiet=quiet,
+            summary_only=summary_only,
+        )
+
+    _emit_errors(batch.errors, quiet=quiet, summary_only=summary_only)
+
+    if batch.notes:
+        _emit_message(
+            "[yellow]Plan notes:[/yellow]",
+            mode="warning",
+            quiet=quiet,
+            summary_only=summary_only,
+        )
+        for note in batch.notes:
+            _emit_message(
+                f"  - {note}",
+                mode="warning",
+                quiet=quiet,
+                summary_only=summary_only,
+            )
+
+    if batch.ingestion.needs_review:
+        _emit_message(
+            f"[yellow]{len(batch.ingestion.needs_review)} files require review based on the "
+            "current confidence threshold.[/yellow]",
+            mode="warning",
+            quiet=quiet,
+            summary_only=summary_only,
+        )
+
+    if batch.quarantine_paths:
+        _emit_message(
+            f"[yellow]{len(batch.quarantine_paths)} files moved to quarantine.[/yellow]",
+            mode="warning",
+            quiet=quiet,
+            summary_only=summary_only,
+        )
+
+    summary_metrics: dict[str, Any] = {
+        "processed": batch.counts["processed"],
+        "needs_review": batch.counts["needs_review"],
+        "quarantined": batch.counts["quarantined"],
+        "renames": batch.counts["renames"],
+        "moves": batch.counts["moves"],
+        "conflicts": batch.counts["conflicts"],
+        "errors": batch.counts["errors"],
+    }
+    if batch.dry_run:
+        summary_metrics["dry_run"] = True
+
+    _emit_message(
+        _format_summary_line("Watch", batch.target_root, summary_metrics),
+        mode="summary",
+        quiet=quiet,
+        summary_only=summary_only,
+    )
 
 
 def _not_implemented(command: str) -> None:
@@ -237,225 +253,6 @@ def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
         node = existing
     node[path[-1]] = value
 
-
-def _descriptor_to_record(
-    descriptor: FileDescriptor,
-    decision: Optional[ClassificationDecision],
-    root: Path,
-) -> FileRecord:
-    """Convert ingestion and classification data into a state record.
-
-    Args:
-        descriptor: Descriptor produced by the ingestion pipeline.
-        decision: Classification decision associated with the descriptor, if any.
-        root: Root directory for the collection.
-
-    Returns:
-        FileRecord: The state record ready to be saved.
-    """
-
-    try:
-        relative = descriptor.path.relative_to(root)
-    except ValueError:
-        relative = descriptor.path
-
-    last_modified = None
-    modified_raw = descriptor.metadata.get("modified_at")
-    if modified_raw:
-        try:
-            normalized = (
-                modified_raw.replace("Z", "+00:00") if modified_raw.endswith("Z") else modified_raw
-            )
-            last_modified = datetime.fromisoformat(normalized)
-        except ValueError:
-            last_modified = None
-
-    categories: list[str] = []
-    tags: list[str] = descriptor.tags
-    confidence: Optional[float] = None
-    rename_suggestion: Optional[str] = None
-    reasoning: Optional[str] = None
-
-    needs_review = False
-
-    if decision is not None:
-        categories = [decision.primary_category]
-        categories.extend(decision.secondary_categories)
-        tags = decision.tags or categories
-        confidence = decision.confidence
-        rename_suggestion = decision.rename_suggestion
-        reasoning = decision.reasoning
-        needs_review = decision.needs_review
-
-    return FileRecord(
-        path=str(relative),
-        hash=descriptor.hash,
-        tags=tags,
-        categories=categories,
-        confidence=confidence,
-        last_modified=last_modified,
-        rename_suggestion=rename_suggestion,
-        reasoning=reasoning,
-        needs_review=needs_review,
-    )
-
-
-def _run_classification(
-    descriptors: Iterable[FileDescriptor],
-    prompt: Optional[str],
-    root: Path,
-    dry_run: bool,
-    config: DorgyConfig,
-    cache: Optional[ClassificationCache],
-) -> ClassificationBatch:
-    """Run the classification engine with graceful degradation.
-
-    Args:
-        descriptors: Descriptors to classify.
-        prompt: Optional prompt supplied by the user.
-        root: Collection root path.
-        dry_run: Indicates whether we are in dry-run mode.
-        config: Loaded configuration object.
-        cache: Optional cache for reusing classification results.
-
-    Returns:
-        ClassificationBatch: Decisions and errors from the classification step.
-    """
-
-    descriptors = list(descriptors)
-    if not descriptors:
-        return ClassificationBatch()
-
-    if cache is not None:
-        cache.load()
-
-    decisions: list[Optional[ClassificationDecision]] = [None] * len(descriptors)
-    errors: list[str] = []
-    missing_requests: list[ClassificationRequest] = []
-    missing_indices: list[int] = []
-    missing_keys: list[Optional[str]] = []
-
-    for index, descriptor in enumerate(descriptors):
-        key = _decision_key(descriptor, root)
-        cached = cache.get(key) if cache is not None and key is not None else None
-        if cached is not None:
-            decisions[index] = cached
-        else:
-            missing_indices.append(index)
-            missing_keys.append(key)
-            missing_requests.append(
-                ClassificationRequest(
-                    descriptor=descriptor,
-                    prompt=prompt,
-                    collection_root=root,
-                )
-            )
-
-    if missing_requests:
-        engine = ClassificationEngine()
-        batch = engine.classify(missing_requests)
-        errors.extend(batch.errors)
-        for idx, decision, key in zip(missing_indices, batch.decisions, missing_keys, strict=False):
-            if decision is not None:
-                decisions[idx] = decision
-                if not dry_run and cache is not None and key is not None:
-                    cache.set(key, decision)
-
-    if cache is not None and not dry_run:
-        cache.save()
-
-    return ClassificationBatch(decisions=decisions, errors=errors)
-
-
-def _zip_decisions(
-    batch: ClassificationBatch,
-    descriptors: Iterable[FileDescriptor],
-) -> Iterable[tuple[Optional[ClassificationDecision], FileDescriptor]]:
-    """Zip decisions with descriptors, filling missing entries with ``None``.
-
-    Args:
-        batch: Result batch returned by the classification engine.
-        descriptors: Original descriptors from ingestion.
-
-    Yields:
-        Tuples of (decision or ``None``, descriptor).
-    """
-
-    decisions = list(batch.decisions)
-    descriptors = list(descriptors)
-    for index, descriptor in enumerate(descriptors):
-        decision = decisions[index] if index < len(decisions) else None
-        yield decision, descriptor
-
-
-def _relative_to_collection(path: Path, root: Path) -> str:
-    """Return the relative path of ``path`` to ``root`` if possible."""
-
-    try:
-        return str(path.relative_to(root))
-    except ValueError:
-        return str(path)
-
-
-def _build_original_snapshot(
-    descriptors: Iterable[FileDescriptor],
-    root: Path,
-) -> dict[str, Any]:
-    """Create a snapshot describing the pre-organization file structure.
-
-    Args:
-        descriptors: File descriptors produced before any moves/renames.
-        root: Collection root path used to compute relative paths.
-
-    Returns:
-        dict[str, Any]: Snapshot payload ready to persist via the state repository.
-    """
-
-    generated_at = datetime.now(timezone.utc).isoformat()
-    entries: list[dict[str, Any]] = []
-    for descriptor in descriptors:
-        entries.append(
-            {
-                "path": _relative_to_collection(descriptor.path, root),
-                "display_name": descriptor.display_name,
-                "mime_type": descriptor.mime_type,
-                "hash": descriptor.hash,
-                "size_bytes": descriptor.metadata.get("size_bytes"),
-                "tags": list(descriptor.tags),
-            }
-        )
-
-    return {"generated_at": generated_at, "entries": entries}
-
-
-def _decision_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
-    """Compute a stable cache key for a descriptor."""
-
-    if descriptor.hash:
-        return descriptor.hash
-    return _relative_to_collection(descriptor.path, root)
-
-
-def _apply_rename(path: Path, suggestion: str) -> Path:
-    """Rename ``path`` to match ``suggestion`` while avoiding collisions."""
-
-    suffix = path.suffix
-    sanitized = suggestion.strip()
-    if not sanitized:
-        return path
-
-    base_candidate = sanitized
-    candidate = path.with_name(f"{base_candidate}{suffix}")
-    counter = 1
-    while candidate.exists() and candidate != path:
-        candidate = path.with_name(f"{base_candidate}-{counter}{suffix}")
-        counter += 1
-
-    if candidate == path:
-        return path
-
-    path.rename(candidate)
-    return candidate
 
 
 def _format_history_event(event: OperationEvent) -> str:
@@ -581,7 +378,7 @@ def org(
         )
 
         result = pipeline.run([source_root])
-        classification_batch = _run_classification(
+        classification_batch = run_classification(
             result.processed,
             prompt,
             source_root,
@@ -590,7 +387,7 @@ def org(
             classification_cache,
         )
 
-        paired = list(_zip_decisions(classification_batch, result.processed))
+        paired = list(zip_decisions(classification_batch, result.processed))
         confidence_threshold = config.ambiguity.confidence_threshold
         for decision, descriptor in paired:
             if decision is not None and decision.confidence < confidence_threshold:
@@ -637,10 +434,11 @@ def org(
             )
 
             metadata = descriptor.metadata
+            relative_path = original_path
             try:
                 relative_path = original_path.relative_to(source_root)
             except ValueError:
-                relative_path = original_path
+                pass
             category = decision.primary_category if decision else "-"
             table_rows.append(
                 (
@@ -652,7 +450,7 @@ def org(
                 )
             )
 
-        counts = _compute_org_counts(result, classification_batch, plan)
+        counts = compute_org_counts(result, classification_batch, plan)
         json_payload: dict[str, Any] = {
             "context": {
                 "source_root": source_root.as_posix(),
@@ -666,7 +464,7 @@ def org(
             "files": file_entries,
             "notes": list(plan.notes),
         }
-        json_payload["errors"] = _collect_error_payload(result, classification_batch)
+        json_payload["errors"] = collect_error_payload(result, classification_batch)
 
         if json_output and dry_run:
             console.print_json(data=json_payload)
@@ -815,7 +613,7 @@ def org(
 
         snapshot: dict[str, Any] | None = None
         if not dry_run:
-            snapshot = _build_original_snapshot([descriptor for _, descriptor in paired], source_root)
+            snapshot = build_original_snapshot([descriptor for _, descriptor in paired], source_root)
 
         executor = OperationExecutor(
             staging_root=state_dir / "staging",
@@ -836,12 +634,12 @@ def org(
         for decision, descriptor in paired:
             original_path = descriptor.path
             final_path = final_path_map.get(original_path, original_path)
-            old_relative = _relative_to_collection(original_path, target_root)
+            old_relative = relative_to_collection(original_path, target_root)
 
             descriptor.path = final_path
             descriptor.display_name = descriptor.path.name
 
-            record = _descriptor_to_record(descriptor, decision, target_root)
+            record = descriptor_to_record(descriptor, decision, target_root)
 
             state.files.pop(old_relative, None)
             state.files[record.path] = record
@@ -897,8 +695,8 @@ def org(
                 summary_only=summary_only,
             )
 
-        counts = _compute_org_counts(result, classification_batch, plan)
-        errors_payload = _collect_error_payload(result, classification_batch)
+        counts = compute_org_counts(result, classification_batch, plan)
+        errors_payload = collect_error_payload(result, classification_batch)
         json_payload["counts"] = counts
         json_payload["errors"] = errors_payload
         json_payload["history"] = [event.model_dump(mode="json") for event in events]
@@ -944,23 +742,155 @@ def org(
 
 
 @cli.command()
-@click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("-r", "--recursive", is_flag=True, help="Watch subdirectories too.")
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, file_okay=False, path_type=str))
+@click.option("-r", "--recursive", is_flag=True, help="Include subdirectories for monitoring.")
+@click.option("--prompt", type=str, help="Provide extra classification guidance.")
 @click.option(
     "--output",
     type=click.Path(file_okay=False, path_type=str),
-    help="Directory for organized files.",
+    help="Destination root when copying organized files.",
 )
-def watch(**_: object) -> None:
-    """Continuously organize new files within PATH.
+@click.option("--dry-run", is_flag=True, help="Preview actions without mutating files.")
+@click.option("--debounce", type=float, help="Override debounce interval in seconds.")
+@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing watch batches.")
+@click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
+@click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@click.option("--once", is_flag=True, help="Process current contents once and exit.")
+@click.pass_context
+def watch(
+    ctx: click.Context,
+    paths: tuple[str, ...],
+    recursive: bool,
+    prompt: str | None,
+    output: str | None,
+    dry_run: bool,
+    debounce: float | None,
+    json_output: bool,
+    summary_mode: bool,
+    quiet: bool,
+    once: bool,
+) -> None:
+    """Continuously monitor PATHS and organize changes as they arrive.
 
     Args:
-        _: Placeholder for Click-injected keyword arguments.
+        ctx: Click context for parameter source inspection.
+        paths: One or more directory roots to monitor.
+        recursive: Whether to include subdirectories while watching.
+        prompt: Optional natural-language guidance for classification.
+        output: Optional destination for copy-mode organization.
+        dry_run: When True, skip filesystem mutations.
+        debounce: Optional debounce override in seconds.
+        json_output: When True, emit JSON payloads instead of text.
+        summary_mode: When True, restrict output to summary/warning lines.
+        quiet: When True, suppress non-error output entirely.
+        once: When True, process current contents once and exit.
 
-    Returns:
-        None: This function is invoked for its side effects.
+    Raises:
+        click.ClickException: If option combinations are invalid.
     """
-    _not_implemented("dorgy watch")
+
+    if not paths:
+        raise click.ClickException("Provide at least one PATH to monitor.")
+
+    try:
+        manager = ConfigManager()
+        manager.ensure_exists()
+        config = manager.load()
+    except ConfigError as exc:
+        _handle_cli_error(str(exc), code="config_error", json_output=json_output)
+        return
+
+    explicit_quiet = ctx.get_parameter_source("quiet") == ParameterSource.COMMANDLINE
+    explicit_summary = ctx.get_parameter_source("summary_mode") == ParameterSource.COMMANDLINE
+
+    quiet_enabled = quiet if explicit_quiet else config.cli.quiet_default
+    summary_only = summary_mode if explicit_summary else config.cli.summary_default
+
+    if json_output:
+        if quiet_enabled and explicit_quiet:
+            raise click.ClickException("--json cannot be combined with --quiet.")
+        if summary_only and explicit_summary:
+            raise click.ClickException("--json cannot be combined with --summary.")
+
+    if quiet_enabled and summary_only:
+        raise click.ClickException(
+            "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
+        )
+
+    if debounce is not None and debounce <= 0:
+        raise click.ClickException("--debounce must be greater than zero.")
+
+    root_paths = [Path(path).expanduser().resolve() for path in paths]
+    output_path = Path(output).expanduser().resolve() if output else None
+    if output_path is not None and len(root_paths) != 1:
+        raise click.ClickException("--output currently supports a single PATH.")
+
+    recursive_enabled = recursive or config.processing.recurse_directories
+
+    try:
+        service = WatchService(
+            config,
+            roots=root_paths,
+            prompt=prompt,
+            output=output_path,
+            dry_run=dry_run,
+            recursive=recursive_enabled,
+            debounce_override=debounce,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if once:
+        batches = service.process_once()
+        if json_output:
+            console.print_json(data={"batches": [batch.json_payload for batch in batches]})
+            return
+        if not batches:
+            _emit_message(
+                "[yellow]No files matched the watch criteria during the one-shot run.[/yellow]",
+                mode="warning",
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
+            return
+        for batch in batches:
+            _emit_watch_batch(
+                batch,
+                json_output=False,
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
+        return
+
+    if not json_output:
+        monitored = ", ".join(str(path) for path in root_paths)
+        _emit_message(
+            f"[cyan]Watching {monitored}. Press Ctrl+C to stop.[/cyan]",
+            mode="detail",
+            quiet=quiet_enabled,
+            summary_only=summary_only,
+        )
+
+    try:
+        service.watch(
+            lambda batch: _emit_watch_batch(
+                batch,
+                json_output=json_output,
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
+        )
+    except KeyboardInterrupt:
+        service.stop()
+        if not json_output:
+            _emit_message(
+                "[yellow]Watch stopped by user request.[/yellow]",
+                mode="summary",
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
+    except RuntimeError as exc:
+        _handle_cli_error(str(exc), code="watch_runtime_error", json_output=json_output, original=exc)
 
 
 @cli.group()

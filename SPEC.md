@@ -124,6 +124,14 @@ processing:
   corrupted_files:
     action: "skip"  # skip, quarantine
 
+  # Watch service tuning
+  watch:
+    debounce_seconds: 2.0
+    max_batch_interval_seconds: 10.0
+    max_batch_items: 128
+    error_backoff_seconds: 5.0
+    max_error_backoff_seconds: 60.0
+
 # Organization Strategies
 organization:  
   # Naming conflicts
@@ -298,7 +306,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 3 – LLM & DSPy Integration | Implement `dorgyanizer` module, provider-agnostic LLM client, caching, low-confidence fallbacks |
 | [x] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
-| [ ] | Phase 5 – Watch Service | `watchdog` observer, debounce/backoff, safe concurrent writes, reuse ingestion pipeline |
+| [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [ ] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
@@ -415,6 +423,12 @@ The project will progress through the following phases. Update the status column
 - Operation plans are applied via the CLI `org` command with JSON/dry-run previews, and undo metadata is captured in `.dorgy/last_plan.json` and `dorgy.log`.
 
 ## Phase 4.5 – CLI Polish & UX
+
+## Phase 5 – Watch Service
+
+- `dorgy watch` provides both one-shot (`--once`) and continuous monitoring modes with summary/quiet/JSON parity matching `dorgy org`.
+- `WatchService` batches filesystem events using configurable debounce/backoff settings (`processing.watch`) and reuses ingestion/classification/organization pipelines.
+- Batches persist incremental updates to `.dorgy/state.json`, `.dorgy/history.jsonl`, and `.dorgy/watch.log`, keeping the collection consistent with manual `org` runs.
 
 ### Goals
 - Harmonize CLI summaries, providing `--summary/--quiet` toggles across `org`, `status`, and `undo` while surfacing destination and operation counts.

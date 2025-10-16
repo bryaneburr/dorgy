@@ -44,6 +44,7 @@ class ProcessingOptions(DorgyBaseModel):
         sample_size_mb: Sample size limit for oversized files.
         locked_files: Policy describing how to handle locked files.
         corrupted_files: Policy describing how to handle corrupted files.
+        watch: Watch configuration controlling debounce and backoff.
     """
 
     use_vision_models: bool = False
@@ -55,6 +56,7 @@ class ProcessingOptions(DorgyBaseModel):
     sample_size_mb: int = 10
     locked_files: "LockedFilePolicy" = Field(default_factory=lambda: LockedFilePolicy())
     corrupted_files: "CorruptedFilePolicy" = Field(default_factory=lambda: CorruptedFilePolicy())
+    watch: "WatchSettings" = Field(default_factory=lambda: WatchSettings())
 
 
 class LockedFilePolicy(DorgyBaseModel):
@@ -79,6 +81,24 @@ class CorruptedFilePolicy(DorgyBaseModel):
     """
 
     action: Literal["skip", "quarantine"] = "skip"
+
+
+class WatchSettings(DorgyBaseModel):
+    """File-system watch configuration.
+
+    Attributes:
+        debounce_seconds: Interval to coalesce filesystem events before processing.
+        max_batch_interval_seconds: Maximum time to wait before flushing a batch.
+        max_batch_items: Maximum number of unique paths in a single batch.
+        error_backoff_seconds: Initial backoff delay when processing fails.
+        max_error_backoff_seconds: Upper bound for exponential backoff delays.
+    """
+
+    debounce_seconds: float = 2.0
+    max_batch_interval_seconds: float = 10.0
+    max_batch_items: int = 128
+    error_backoff_seconds: float = 5.0
+    max_error_backoff_seconds: float = 60.0
 
 
 class OrganizationOptions(DorgyBaseModel):
@@ -173,6 +193,7 @@ __all__ = [
     "ProcessingOptions",
     "LockedFilePolicy",
     "CorruptedFilePolicy",
+    "WatchSettings",
     "OrganizationOptions",
     "AmbiguitySettings",
     "LoggingSettings",

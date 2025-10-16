@@ -7,6 +7,7 @@
 - Document any automation-facing behaviors or integration points directly in the relevant module's AGENTS.md file.
 - Provide detailed Google-style docstrings for every Python module, class, and function; update existing docstrings when behavior or signatures change.
 - CLI commands share summary/quiet helpers and standardized JSON error payloads; extend those utilities when adding new commands and update tests accordingly.
+- The watch service must reuse the organization pipeline helpers and surface batches via the shared CLI output helpers and JSON schema.
 
 ## Tracking & Coordination
 
