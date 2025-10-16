@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -94,6 +95,41 @@ class StateRepository:
                 payload = event.model_dump(mode="json")
                 history_file.write(json.dumps(payload))
                 history_file.write("\n")
+
+    def read_history(self, root: Path, limit: int = 10) -> list[OperationEvent]:
+        """Return the most recent operation history entries for the collection.
+
+        Args:
+            root: Root path of the collection.
+            limit: Maximum number of events to return (most recent first).
+
+        Returns:
+            list[OperationEvent]: Parsed operation events in reverse chronological order.
+        """
+
+        if limit <= 0:
+            return []
+
+        history_path = self._state_dir(root) / "history.jsonl"
+        if not history_path.exists():
+            return []
+
+        buffer: deque[str] = deque(maxlen=limit)
+        with history_path.open("r", encoding="utf-8") as history_file:
+            for line in history_file:
+                line = line.strip()
+                if not line:
+                    continue
+                buffer.append(line)
+
+        events: list[OperationEvent] = []
+        for raw in reversed(buffer):
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise StateError(f"Invalid history entry: {exc}") from exc
+            events.append(OperationEvent.model_validate(payload))
+        return events
 
     def initialize(self, root: Path) -> Path:
         """Prepare the metadata directories for a tracked collection.

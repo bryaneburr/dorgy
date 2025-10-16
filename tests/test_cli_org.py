@@ -188,3 +188,5 @@ def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:
     assert undo_result.exit_code == 0
     assert "Snapshot captured" in undo_result.output
     assert "note.txt" in undo_result.output
+    assert "Recent history" in undo_result.output
+    assert "RENAME" in undo_result.output or "MOVE" in undo_result.output

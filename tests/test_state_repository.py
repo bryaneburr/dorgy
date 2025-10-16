@@ -131,3 +131,32 @@ def test_append_history_persists_events(tmp_path: Path) -> None:
     assert payload["operation"] == "rename"
     assert payload["conflict_applied"] is True
     assert payload["destination"] == "new.txt"
+
+
+def test_read_history_returns_recent_events(tmp_path: Path) -> None:
+    """`read_history` should parse the latest entries in reverse chronological order."""
+
+    repo = StateRepository()
+    base_timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    events = [
+        OperationEvent(
+            timestamp=base_timestamp,
+            operation="rename",
+            source="old.txt",
+            destination="new.txt",
+        ),
+        OperationEvent(
+            timestamp=base_timestamp.replace(minute=5),
+            operation="move",
+            source="new.txt",
+            destination="archive/new.txt",
+        ),
+    ]
+
+    repo.append_history(tmp_path, events)
+
+    fetched = repo.read_history(tmp_path, limit=1)
+    assert len(fetched) == 1
+    assert fetched[0].operation == "move"
+    fetched_all = repo.read_history(tmp_path, limit=5)
+    assert [entry.operation for entry in fetched_all] == ["move", "rename"]

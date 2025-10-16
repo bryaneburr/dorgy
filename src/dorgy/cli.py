@@ -801,6 +801,23 @@ def undo(path: str, dry_run: bool) -> None:
                     console.print("[yellow]Sample paths:[/yellow]")
                     for sample in preview:
                         console.print(f"  - {sample}")
+        try:
+            recent_events = repository.read_history(root, limit=5)
+        except StateError as exc:
+            console.print(f"[yellow]Unable to read history log: {exc}[/yellow]")
+        else:
+            if recent_events:
+                console.print(
+                    f"[yellow]Recent history ({len(recent_events)} entries, newest first):[/yellow]"
+                )
+                for event in recent_events:
+                    notes = ", ".join(event.notes) if event.notes else ""
+                    note_suffix = f" — {notes}" if notes else ""
+                    console.print(
+                        "  - "
+                        f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
+                        f"{event.source} -> {event.destination}{note_suffix}"
+                    )
         return
 
     try:
