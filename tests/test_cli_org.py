@@ -192,6 +192,32 @@ def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:
     assert "RENAME" in undo_result.output or "MOVE" in undo_result.output
 
 
+def test_cli_undo_json(tmp_path: Path) -> None:
+    """Undo JSON output should return structured plan and history details."""
+
+    root = tmp_path / "json"
+    root.mkdir()
+    (root / "budget.txt").write_text("2024", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    dry_json = runner.invoke(cli, ["undo", str(root), "--dry-run", "--json"], env=env)
+    assert dry_json.exit_code == 0
+    payload = json.loads(dry_json.output)
+    assert payload["plan"] is not None
+    assert payload["snapshot"] is not None
+    assert isinstance(payload.get("history"), list)
+
+    apply_json = runner.invoke(cli, ["undo", str(root), "--json"], env=env)
+    assert apply_json.exit_code == 0
+    applied = json.loads(apply_json.output)
+    assert applied["rolled_back"] is True
+    assert applied["plan"] is not None
+
 def test_cli_org_supports_output_relocation(tmp_path: Path) -> None:
     """Organizing into an output directory should copy files into the new root."""
 
@@ -219,3 +245,60 @@ def test_cli_org_supports_output_relocation(tmp_path: Path) -> None:
     assert state_path.exists()
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert "documents/receipt.txt" in state["files"]
+
+
+def test_cli_status_requires_state(tmp_path: Path) -> None:
+    """Status should fail when no state has been recorded yet."""
+
+    root = tmp_path / "nostate"
+    root.mkdir()
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["status", str(root)], env=env)
+
+    assert result.exit_code != 0
+    assert "No organization state" in result.output
+
+
+def test_cli_status_outputs_summary(tmp_path: Path) -> None:
+    """Status command should show a summary of the collection."""
+
+    root = tmp_path / "status"
+    root.mkdir()
+    (root / "todo.txt").write_text("tasks", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    status_result = runner.invoke(cli, ["status", str(root)], env=env)
+
+    assert status_result.exit_code == 0
+    assert "Status for" in status_result.output
+    assert "Files tracked" in status_result.output
+    assert "Recent history" in status_result.output
+
+
+def test_cli_status_json(tmp_path: Path) -> None:
+    """Status JSON output should include state, snapshot, and history data."""
+
+    root = tmp_path / "status-json"
+    root.mkdir()
+    (root / "invoice.txt").write_text("paid", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    status_result = runner.invoke(cli, ["status", str(root), "--json"], env=env)
+    assert status_result.exit_code == 0
+    payload = json.loads(status_result.output)
+    assert payload["files_tracked"] >= 1
+    assert "history" in payload
+    assert "snapshot" in payload

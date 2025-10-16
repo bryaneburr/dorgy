@@ -30,6 +30,24 @@ uv run dorgy config set llm.temperature --value 0.25
 
 Refer to `AGENTS.md` for automation guidelines and team coordination expectations.
 
+### Current CLI Highlights
+
+```bash
+# Organize a directory in place
+uv run dorgy org ./documents
+
+# Organize into a separate output directory (preserves originals)
+uv run dorgy org ./inbox --output ./organized
+
+# Preview undo information (text or JSON)
+uv run dorgy undo ./documents --dry-run
+uv run dorgy undo ./documents --dry-run --json
+
+# Inspect collection status and recent history
+uv run dorgy status ./documents
+uv run dorgy status ./documents --json
+```
+
 ### Configuration Notes
 
 - Configuration lives at `~/.dorgy/config.yaml`. Run `uv run dorgy config view` to inspect the effective settings (including environment overrides).

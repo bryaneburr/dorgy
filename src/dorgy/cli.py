@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -296,6 +297,15 @@ def _apply_rename(path: Path, suggestion: str) -> Path:
 
     path.rename(candidate)
     return candidate
+
+
+def _format_history_event(event: OperationEvent) -> str:
+    notes = ", ".join(event.notes) if event.notes else ""
+    note_suffix = f" — {notes}" if notes else ""
+    return (
+        f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
+        f"{event.source} -> {event.destination}{note_suffix}"
+    )
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -777,8 +787,162 @@ def mv(**_: object) -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
+@click.option("--json", "json_output", is_flag=True, help="Emit status information as JSON.")
+@click.option(
+    "--history",
+    "history_limit",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Number of recent history entries to include.",
+)
+def status(path: str, json_output: bool, history_limit: int) -> None:
+    """Display a summary of the collection state for PATH."""
+
+    root = Path(path).expanduser().resolve()
+    repository = StateRepository()
+
+    try:
+        state = repository.load(root)
+    except MissingStateError as exc:
+        raise click.ClickException(f"No organization state found for {root}: {exc}") from exc
+
+    files_total = len(state.files)
+    needs_review_count = sum(1 for record in state.files.values() if record.needs_review)
+    tagged_count = sum(1 for record in state.files.values() if record.tags)
+
+    snapshot_payload: dict[str, Any] | None = None
+    snapshot_error = None
+    try:
+        snapshot_payload = repository.load_original_structure(root)
+    except StateError as exc:
+        snapshot_error = str(exc)
+
+    history_error = None
+    history_limit = max(0, history_limit)
+    history_events: list[OperationEvent] = []
+    if history_limit > 0:
+        try:
+            history_events = repository.read_history(root, limit=history_limit)
+        except StateError as exc:
+            history_error = str(exc)
+
+    plan_summary: dict[str, Any] | None = None
+    plan_error = None
+    plan_path = root / ".dorgy" / "last_plan.json"
+    if plan_path.exists():
+        try:
+            plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+            plan_summary = {
+                "renames": len(plan_data.get("renames", [])),
+                "moves": len(plan_data.get("moves", [])),
+                "metadata_updates": len(plan_data.get("metadata_updates", [])),
+            }
+        except json.JSONDecodeError as exc:
+            plan_error = str(exc)
+
+    needs_review_dir = root / ".dorgy" / "needs-review"
+    review_entries = (
+        sorted(path.name for path in needs_review_dir.iterdir())
+        if needs_review_dir.exists()
+        else []
+    )
+
+    quarantine_dir = root / ".dorgy" / "quarantine"
+    quarantine_entries = (
+        sorted(path.name for path in quarantine_dir.iterdir())
+        if quarantine_dir.exists()
+        else []
+    )
+
+    state_summary = {
+        "root": str(root),
+        "created_at": state.created_at.isoformat(),
+        "updated_at": state.updated_at.isoformat(),
+        "files_tracked": files_total,
+        "needs_review": needs_review_count,
+        "tagged": tagged_count,
+        "directory_counts": {
+            "needs_review": len(review_entries),
+            "quarantine": len(quarantine_entries),
+        },
+        "plan": plan_summary,
+        "history": [event.model_dump(mode="json") for event in history_events],
+    }
+
+    if json_output:
+        payload = {
+            **state_summary,
+            "snapshot": snapshot_payload,
+            "errors": {},
+            "directories": {
+                "needs_review": review_entries[:5],
+                "quarantine": quarantine_entries[:5],
+            },
+        }
+        if snapshot_error:
+            payload["errors"]["snapshot"] = snapshot_error
+        if history_error:
+            payload["errors"]["history"] = history_error
+        if plan_error:
+            payload["errors"]["last_plan"] = plan_error
+        console.print_json(data=payload)
+        return
+
+    table = Table(title=f"Status for {root}")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Files tracked", str(files_total))
+    table.add_row("Needs review (state)", str(needs_review_count))
+    table.add_row("Tagged files", str(tagged_count))
+    table.add_row("Created", state.created_at.isoformat())
+    table.add_row("Last updated", state.updated_at.isoformat())
+    table.add_row("Needs-review dir entries", str(len(review_entries)))
+    table.add_row("Quarantine dir entries", str(len(quarantine_entries)))
+    if plan_summary is not None:
+        table.add_row("Last plan renames", str(plan_summary.get("renames", 0)))
+        table.add_row("Last plan moves", str(plan_summary.get("moves", 0)))
+        table.add_row("Last plan metadata updates", str(plan_summary.get("metadata_updates", 0)))
+    elif plan_error:
+        table.add_row("Last plan", f"Error: {plan_error}")
+    console.print(table)
+
+    if snapshot_payload:
+        generated_at = snapshot_payload.get("generated_at", "unknown")
+        entry_count = len(snapshot_payload.get("entries", []))
+        console.print(
+            f"[cyan]Snapshot generated at {generated_at} with {entry_count} entries.[/cyan]"
+        )
+    elif snapshot_error:
+        console.print(f"[yellow]Unable to load snapshot: {snapshot_error}[/yellow]")
+
+    if review_entries:
+        preview = review_entries[:5]
+        console.print("[yellow]Needs-review directory samples:[/yellow]")
+        for entry in preview:
+            console.print(f"  - {entry}")
+
+    if quarantine_entries:
+        preview = quarantine_entries[:5]
+        console.print("[yellow]Quarantine directory samples:[/yellow]")
+        for entry in preview:
+            console.print(f"  - {entry}")
+
+    if history_events:
+        console.print(
+            f"[green]Recent history ({len(history_events)} entries, newest first):[/green]"
+        )
+        for event in history_events:
+            console.print(f"  - {_format_history_event(event)}")
+    elif history_error:
+        console.print(f"[yellow]Unable to read history log: {history_error}[/yellow]")
+
+
+@cli.command()
+@click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 @click.option("--dry-run", is_flag=True, help="Preview rollback without applying it.")
-def undo(path: str, dry_run: bool) -> None:
+@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing the rollback plan.")
+def undo(path: str, dry_run: bool, json_output: bool) -> None:
     """Rollback the last organization plan applied to PATH."""
 
     root = Path(path).expanduser().resolve()
@@ -790,9 +954,47 @@ def undo(path: str, dry_run: bool) -> None:
     except MissingStateError as exc:
         raise click.ClickException(f"No organization state found for {root}: {exc}") from exc
 
+    plan = executor._load_plan(root)  # type: ignore[attr-defined]
+    plan_summary = {
+        "renames": [op.model_dump(mode="json") for op in plan.renames] if plan else [],
+        "moves": [op.model_dump(mode="json") for op in plan.moves] if plan else [],
+    } if plan else None
+
+    snapshot_payload: dict[str, Any] | None = None
+    try:
+        snapshot_payload = repository.load_original_structure(root)
+    except StateError as exc:
+        snapshot_error = str(exc)
+        snapshot_payload = None
+    else:
+        snapshot_error = None
+
+    history_error = None
+    try:
+        history_events = repository.read_history(root, limit=5)
+    except StateError as exc:
+        history_events = []
+        history_error = str(exc)
+
     if dry_run:
+        if json_output:
+            payload: dict[str, Any] = {
+                "root": str(root),
+                "plan": plan_summary,
+                "snapshot": snapshot_payload,
+        "history": [event.model_dump(mode="json") for event in history_events],
+                "errors": {},
+            }
+            if plan is None:
+                payload["plan"] = None
+            if snapshot_error:
+                payload["errors"]["snapshot"] = snapshot_error
+            if history_error:
+                payload["errors"]["history"] = history_error
+            console.print_json(data=payload)
+            return
+
         console.print("[yellow]Dry run: organization rollback simulated.[/yellow]")
-        plan = executor._load_plan(root)  # type: ignore[attr-defined]
         if plan is None:
             console.print("[yellow]No plan available to roll back.[/yellow]")
         else:
@@ -800,38 +1002,32 @@ def undo(path: str, dry_run: bool) -> None:
                 "[yellow]Plan contains "
                 f"{len(plan.renames)} renames and {len(plan.moves)} moves.[/yellow]"
             )
-        try:
-            snapshot = repository.load_original_structure(root)
-        except StateError as exc:
-            console.print(f"[yellow]Unable to load original snapshot: {exc}[/yellow]")
-        else:
-            if snapshot:
-                entries = snapshot.get("entries", [])
+        if snapshot_payload:
+            entries = snapshot_payload.get("entries", [])
+            console.print(
+                f"[yellow]Snapshot captured {len(entries)} original entries before organization.[/yellow]"
+            )
+            preview = [entry.get("path", "?") for entry in entries[:5]]
+            if preview:
+                console.print("[yellow]Sample paths:[/yellow]")
+                for sample in preview:
+                    console.print(f"  - {sample}")
+        elif snapshot_error:
+            console.print(f"[yellow]Unable to load original snapshot: {snapshot_error}[/yellow]")
+        if history_events:
+            console.print(
+                f"[yellow]Recent history ({len(history_events)} entries, newest first):[/yellow]"
+            )
+            for event in history_events:
+                notes = ", ".join(event.notes) if event.notes else ""
+                note_suffix = f" — {notes}" if notes else ""
                 console.print(
-                    f"[yellow]Snapshot captured {len(entries)} original entries before organization.[/yellow]"
+                    "  - "
+                    f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
+                    f"{event.source} -> {event.destination}{note_suffix}"
                 )
-                preview = [entry.get("path", "?") for entry in entries[:5]]
-                if preview:
-                    console.print("[yellow]Sample paths:[/yellow]")
-                    for sample in preview:
-                        console.print(f"  - {sample}")
-        try:
-            recent_events = repository.read_history(root, limit=5)
-        except StateError as exc:
-            console.print(f"[yellow]Unable to read history log: {exc}[/yellow]")
-        else:
-            if recent_events:
-                console.print(
-                    f"[yellow]Recent history ({len(recent_events)} entries, newest first):[/yellow]"
-                )
-                for event in recent_events:
-                    notes = ", ".join(event.notes) if event.notes else ""
-                    note_suffix = f" — {notes}" if notes else ""
-                    console.print(
-                        "  - "
-                        f"[{event.timestamp.isoformat()}] {event.operation.upper()} "
-                        f"{event.source} -> {event.destination}{note_suffix}"
-                    )
+        elif history_error:
+            console.print(f"[yellow]Unable to read history log: {history_error}[/yellow]")
         return
 
     try:
@@ -840,7 +1036,16 @@ def undo(path: str, dry_run: bool) -> None:
         raise click.ClickException(str(exc)) from exc
 
     repository.save(root, state)
-    console.print(f"[green]Rolled back last plan for {root}.[/green]")
+    if json_output:
+        payload = {
+            "root": str(root),
+            "rolled_back": True,
+            "plan": plan_summary,
+            "history": [event.model_dump(mode="json") for event in history_events],
+        }
+        console.print_json(data=payload)
+    else:
+        console.print(f"[green]Rolled back last plan for {root}.[/green]")
 
 
 def main() -> None:
