@@ -48,21 +48,25 @@ class ClassificationEngine:
     """
 
     def __init__(self, settings: Optional[LLMSettings] = None) -> None:
-        enable_dspy = os.getenv("DORGY_ENABLE_DSPY") == "1"
-        self._has_dspy = dspy is not None and enable_dspy
+        use_fallback = os.getenv("DORGY_USE_FALLBACK") == "1"
         self._settings = settings or LLMSettings()
-        if self._has_dspy:
-            try:
-                if not self._configure_language_model():
-                    raise NotImplementedError("Failed to configure LM")
-                self._program = self._build_program()
-            except NotImplementedError:
-                LOGGER.info("DSPy program not yet implemented; using heuristic fallback instead.")
-                self._program = None
-                self._has_dspy = False
-        if not self._has_dspy:
+
+        if use_fallback:
+            self._has_dspy = False
             self._program = None
-            LOGGER.info("DSPy not installed; using heuristic fallback for classification.")
+            LOGGER.info("Heuristic fallback enabled by DORGY_USE_FALLBACK=1.")
+            return
+
+        if dspy is None:
+            raise RuntimeError(
+                "DSPy is not installed. Install the `dspy` package (and any provider-specific "
+                "dependencies), or set DORGY_USE_FALLBACK=1 to enable the heuristic classifier."
+            )
+
+        self._settings = settings or LLMSettings()
+        self._configure_language_model()
+        self._program = self._build_program()
+        self._has_dspy = True
 
     def classify(self, requests: Iterable[ClassificationRequest]) -> ClassificationBatch:
         """Run the DSPy program for each request.
@@ -148,10 +152,41 @@ class ClassificationEngine:
     # Internal helpers                                                   #
     # ------------------------------------------------------------------ #
 
-    def _configure_language_model(self) -> bool:
+    def _configure_language_model(self) -> None:
         """Configure the DSPy language model according to LLM settings."""
-        if dspy is None:  # pragma: no cover - guarded by caller
-            return False
+        default_settings = LLMSettings()
+        configured = any(
+            [
+                self._settings.api_base_url,
+                self._settings.api_key,
+                self._settings.provider != default_settings.provider,
+                self._settings.model != default_settings.model,
+            ]
+        )
+        if not configured:
+            raise RuntimeError(
+                "LLM configuration is incomplete. Update ~/.dorgy/config.yaml with valid values "
+                "for the llm block (provider/model/api_key or api_base_url), or set "
+                "DORGY_USE_FALLBACK=1 to force the heuristic classifier."
+            )
+
+        api_key_missing = self._settings.api_key is None
+
+        if self._settings.api_base_url and api_key_missing:
+            # Local gateways (e.g., Ollama) don't require authentication, so supply an empty string.
+            self._settings.api_key = ""
+            api_key_missing = False
+
+        if (
+            self._settings.provider
+            and self._settings.provider != "local"
+            and self._settings.api_base_url is None
+            and api_key_missing
+        ):
+            raise RuntimeError(
+                "llm.provider is set to a remote provider but llm.api_key is missing. Provide the "
+                "API key or set DORGY_USE_FALLBACK=1 to use the heuristic classifier."
+            )
 
         lm_kwargs: dict[str, object] = {
             "model": self._settings.model,
@@ -159,22 +194,23 @@ class ClassificationEngine:
             "max_tokens": self._settings.max_tokens,
         }
 
-        if self._settings.api_key:
-            lm_kwargs["api_key"] = self._settings.api_key
-
         if self._settings.api_base_url:
             lm_kwargs["api_base"] = self._settings.api_base_url
         elif self._settings.provider:
             lm_kwargs["provider"] = self._settings.provider
 
+        if self._settings.api_key is not None:
+            lm_kwargs["api_key"] = self._settings.api_key
+
         try:
             language_model = dspy.LM(**lm_kwargs)
             dspy.settings.configure(lm=language_model)
         except Exception as exc:  # pragma: no cover - DSPy misconfiguration
-            LOGGER.warning("Unable to configure DSPy language model: %s", exc, exc_info=True)
-            return False
-
-        return True
+            raise RuntimeError(
+                "Unable to configure the DSPy language model. Verify your llm.* settings "
+                "(provider/model/api_key/api_base_url) or set DORGY_USE_FALLBACK=1 to use the "
+                "heuristic classifier."
+            ) from exc
 
     def _classify_with_dspy(self, request: ClassificationRequest) -> ClassificationDecision:
         """Leverage DSPy program to classify the file.

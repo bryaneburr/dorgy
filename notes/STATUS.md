@@ -32,7 +32,7 @@
 - Started Phase 3 on `feature/phase-3-classification`; added classification models, DSPy engine scaffolding, and smoke tests obeying Google-style docstrings.
 - Next actions: implement DSPy-backed classification, persist decisions into state, and extend CLI workflows to surface classification results.
 - Implemented heuristic classification fallback, CLI integration (including rename toggle support), state persistence of decisions, and coverage for new behaviours.
-- Added JSON-backed classification cache, confidence-based review routing, and optional DSPy activation via `DORGY_ENABLE_DSPY`.
+- Added JSON-backed classification cache, confidence-based review routing, and optional DSPy fallback toggle via `DORGY_USE_FALLBACK`.
 
 ## 2025-10-18
 - Began Phase 4 organization engine: planner/executor scaffolding, rename conflict resolution, category-based moves, and undo/logging (`last_plan.json`).

@@ -372,7 +372,7 @@ The project will progress through the following phases. Update the status column
 - Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
 
 ### Progress Summary
-- Classification engine provides a heuristic fallback by default with optional DSPy integration (`DORGY_ENABLE_DSPY=1`) and JSON-backed caching.
+- Classification engine now uses DSPy by default; set `DORGY_USE_FALLBACK=1` only for development/testing heuristics, and configuration drives provider/api_base_url with JSON-backed caching.
 - LLM settings now wire provider/api_base_url/model/api_key directly into the DSPy client with defaults of temperature=1.0 and max_tokens=25000 for remote gateways.
 - CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
 
