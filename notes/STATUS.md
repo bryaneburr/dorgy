@@ -88,4 +88,5 @@
 - Updated SPEC Phase 8 status plus AGENTS directives to point contributors to the new CI entry point and its expected tooling coverage.
 - Followed up on initial workflow failure by switching the sync step to `uv sync --extra dev --locked`, ensuring dev extras install cleanly in GitHub Actions.
 - Adjusted the MyPy step to `uv run mypy src main.py` so the workflow targets our packages explicitly and avoids empty invocations.
+- Resolved CI-only MyPy complaints by refining optional dependency shims for `python-magic` and `watchdog`, ensuring stub fallbacks use explicit ignores without clashing with module assignments.
 - Next actions: monitor initial workflow runs, then expand coverage (matrix/caching or additional hooks) once baseline stability is confirmed.

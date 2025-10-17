@@ -11,15 +11,19 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, Optional, cast
 
-try:  # pragma: no cover - optional dependency wiring
+if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from watchdog.events import FileSystemEvent, FileSystemEventHandler
     from watchdog.observers import Observer
-except ImportError:  # pragma: no cover - fallback when watchdog missing
-    Observer = cast(Any, None)
-    FileSystemEvent = cast(Any, object)
-    FileSystemEventHandler = cast(Any, object)
+else:  # pragma: no cover - runtime optional dependency wiring
+    try:
+        from watchdog.events import FileSystemEvent, FileSystemEventHandler
+        from watchdog.observers import Observer
+    except ImportError:
+        FileSystemEvent = cast(Any, object)  # type: ignore[assignment]
+        FileSystemEventHandler = cast(Any, object)  # type: ignore[assignment]
+        Observer = cast(Any, None)  # type: ignore[assignment]
 
 from dorgy.classification import ClassificationBatch, ClassificationCache
 from dorgy.cli_support import (
