@@ -7,7 +7,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import click
 import yaml
@@ -27,13 +27,19 @@ from dorgy.cli_support import (
     zip_decisions,
 )
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
-from dorgy.ingestion import FileDescriptor, IngestionPipeline
+from dorgy.ingestion import IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
 from dorgy.organization.executor import OperationExecutor
 from dorgy.organization.planner import OrganizerPlanner
-from dorgy.state import CollectionState, MissingStateError, OperationEvent, StateError, StateRepository
+from dorgy.state import (
+    CollectionState,
+    MissingStateError,
+    OperationEvent,
+    StateError,
+    StateRepository,
+)
 from dorgy.watch import WatchBatchResult, WatchService
 
 console = Console()
@@ -196,15 +202,47 @@ def _emit_watch_batch(
             summary_only=summary_only,
         )
 
+    executed_removals = [
+        entry for entry in batch.json_payload.get("removals", []) if entry.get("executed")
+    ]
+    if executed_removals and not summary_only:
+        removal_counts: dict[str, int] = {}
+        for entry in executed_removals:
+            kind = entry.get("kind") or "deleted"
+            removal_counts[kind] = removal_counts.get(kind, 0) + 1
+        if removal_counts.get("deleted"):
+            deleted_msg = (
+                "[red]"
+                f"{removal_counts['deleted']} tracked file(s) deleted during watch batch."
+                "[/red]"
+            )
+            _emit_message(
+                deleted_msg,
+                mode="warning",
+                quiet=quiet,
+                summary_only=summary_only,
+            )
+        if removal_counts.get("moved_out"):
+            _emit_message(
+                f"[yellow]{removal_counts['moved_out']} file(s) moved outside watched roots; "
+                "state entries removed.[/yellow]",
+                mode="warning",
+                quiet=quiet,
+                summary_only=summary_only,
+            )
+
     summary_metrics: dict[str, Any] = {
         "processed": batch.counts["processed"],
         "needs_review": batch.counts["needs_review"],
         "quarantined": batch.counts["quarantined"],
         "renames": batch.counts["renames"],
         "moves": batch.counts["moves"],
+        "deleted": batch.counts["deletes"],
         "conflicts": batch.counts["conflicts"],
         "errors": batch.counts["errors"],
     }
+    if batch.suppressed_deletions:
+        summary_metrics["suppressed"] = len(batch.suppressed_deletions)
     if batch.dry_run:
         summary_metrics["dry_run"] = True
 
@@ -252,7 +290,6 @@ def _assign_nested(target: dict[str, Any], path: list[str], value: Any) -> None:
             )
         node = existing
     node[path[-1]] = value
-
 
 
 def _format_history_event(event: OperationEvent) -> str:
@@ -613,7 +650,9 @@ def org(
 
         snapshot: dict[str, Any] | None = None
         if not dry_run:
-            snapshot = build_original_snapshot([descriptor for _, descriptor in paired], source_root)
+            snapshot = build_original_snapshot(
+                [descriptor for _, descriptor in paired], source_root
+            )
 
         executor = OperationExecutor(
             staging_root=state_dir / "staging",
@@ -755,6 +794,11 @@ def org(
 @click.option("--json", "json_output", is_flag=True, help="Emit JSON describing watch batches.")
 @click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
 @click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@click.option(
+    "--allow-deletions",
+    is_flag=True,
+    help="Allow watch runs to drop state entries when files are deleted or leave the collection.",
+)
 @click.option("--once", is_flag=True, help="Process current contents once and exit.")
 @click.pass_context
 def watch(
@@ -768,6 +812,7 @@ def watch(
     json_output: bool,
     summary_mode: bool,
     quiet: bool,
+    allow_deletions: bool,
     once: bool,
 ) -> None:
     """Continuously monitor PATHS and organize changes as they arrive.
@@ -783,6 +828,8 @@ def watch(
         json_output: When True, emit JSON payloads instead of text.
         summary_mode: When True, restrict output to summary/warning lines.
         quiet: When True, suppress non-error output entirely.
+        allow_deletions: When True, permit removal of state entries when files are deleted
+            or leave the watched roots.
         once: When True, process current contents once and exit.
 
     Raises:
@@ -817,6 +864,12 @@ def watch(
             "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
         )
 
+    allow_source = ctx.get_parameter_source("allow_deletions")
+    if allow_source == ParameterSource.COMMANDLINE:
+        allow_deletions_enabled = allow_deletions
+    else:
+        allow_deletions_enabled = config.processing.watch.allow_deletions
+
     if debounce is not None and debounce <= 0:
         raise click.ClickException("--debounce must be greater than zero.")
 
@@ -836,6 +889,7 @@ def watch(
             dry_run=dry_run,
             recursive=recursive_enabled,
             debounce_override=debounce,
+            allow_deletions=allow_deletions_enabled,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -890,7 +944,9 @@ def watch(
                 summary_only=summary_only,
             )
     except RuntimeError as exc:
-        _handle_cli_error(str(exc), code="watch_runtime_error", json_output=json_output, original=exc)
+        _handle_cli_error(
+            str(exc), code="watch_runtime_error", json_output=json_output, original=exc
+        )
 
 
 @cli.group()
@@ -1473,8 +1529,13 @@ def undo(
                     summary_only=summary_only,
                 )
             else:
+                plan_summary = (
+                    "[yellow]"
+                    f"Plan contains {rename_count} rename(s) and {move_count} move(s)."
+                    "[/yellow]"
+                )
                 _emit_message(
-                    f"[yellow]Plan contains {rename_count} rename(s) and {move_count} move(s).[/yellow]",
+                    plan_summary,
                     mode="detail",
                     quiet=quiet_enabled,
                     summary_only=summary_only,
@@ -1482,8 +1543,13 @@ def undo(
 
             if snapshot_payload:
                 entries = snapshot_payload.get("entries", [])
+                snapshot_summary = (
+                    "[yellow]"
+                    f"Snapshot captured {len(entries)} original entries before organization."
+                    "[/yellow]"
+                )
                 _emit_message(
-                    f"[yellow]Snapshot captured {len(entries)} original entries before organization.[/yellow]",
+                    snapshot_summary,
                     mode="detail",
                     quiet=quiet_enabled,
                     summary_only=summary_only,
@@ -1512,8 +1578,13 @@ def undo(
                 )
 
             if history_events:
+                history_summary = (
+                    "[yellow]"
+                    f"Recent history ({len(history_events)} entries, newest first):"
+                    "[/yellow]"
+                )
                 _emit_message(
-                    f"[yellow]Recent history ({len(history_events)} entries, newest first):[/yellow]",
+                    history_summary,
                     mode="detail",
                     quiet=quiet_enabled,
                     summary_only=summary_only,

@@ -92,6 +92,8 @@ class WatchSettings(DorgyBaseModel):
         max_batch_items: Maximum number of unique paths in a single batch.
         error_backoff_seconds: Initial backoff delay when processing fails.
         max_error_backoff_seconds: Upper bound for exponential backoff delays.
+        allow_deletions: Whether to apply destructive state updates when files are
+            deleted or moved outside monitored roots.
     """
 
     debounce_seconds: float = 2.0
@@ -99,6 +101,7 @@ class WatchSettings(DorgyBaseModel):
     max_batch_items: int = 128
     error_backoff_seconds: float = 5.0
     max_error_backoff_seconds: float = 60.0
+    allow_deletions: bool = False
 
 
 class OrganizationOptions(DorgyBaseModel):

@@ -167,9 +167,7 @@ class OperationExecutor:
         counter = 1
         candidate = stage_path
         while candidate.exists():
-            candidate = stage_path.with_name(
-                f"{stage_path.stem}-{counter}{stage_path.suffix}"
-            )
+            candidate = stage_path.with_name(f"{stage_path.stem}-{counter}{stage_path.suffix}")
             counter += 1
         stage_path = candidate
         if self._copy_mode:

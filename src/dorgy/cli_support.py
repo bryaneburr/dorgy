@@ -71,9 +71,9 @@ def run_classification(
     if not descriptors:
         return ClassificationBatch()
 
-    enable_cache = cache is not None
-    if enable_cache:
-        cache.load()
+    cache_instance = cache
+    if cache_instance is not None:
+        cache_instance.load()
 
     decisions: list[Optional[ClassificationDecision]] = [None] * len(descriptors)
     errors: list[str] = []
@@ -83,7 +83,7 @@ def run_classification(
 
     for index, descriptor in enumerate(descriptors):
         key = decision_cache_key(descriptor, root)
-        cached = cache.get(key) if enable_cache and key is not None else None  # type: ignore[union-attr]
+        cached = cache_instance.get(key) if cache_instance is not None and key is not None else None
         if cached is not None:
             decisions[index] = cached
             continue
@@ -105,11 +105,11 @@ def run_classification(
             if decision is None:
                 continue
             decisions[idx] = decision
-            if not dry_run and enable_cache and key is not None:
-                cache.set(key, decision)  # type: ignore[union-attr]
+            if not dry_run and cache_instance is not None and key is not None:
+                cache_instance.set(key, decision)
 
-    if enable_cache and not dry_run:
-        cache.save()
+    if cache_instance is not None and not dry_run:
+        cache_instance.save()
 
     return ClassificationBatch(decisions=decisions, errors=errors)
 
@@ -262,9 +262,8 @@ def compute_org_counts(
 
     ingestion_errors = len(result.errors)
     classification_errors = len(classification_batch.errors)
-    conflict_count = sum(
-        1 for operation in (*plan.renames, *plan.moves) if operation.conflict_applied
-    )
+    conflict_count = sum(1 for operation in plan.renames if operation.conflict_applied)
+    conflict_count += sum(1 for operation in plan.moves if operation.conflict_applied)
 
     return {
         "processed": len(result.processed),
@@ -273,6 +272,7 @@ def compute_org_counts(
         "renames": len(plan.renames),
         "moves": len(plan.moves),
         "metadata_updates": len(plan.metadata_updates),
+        "deletes": len(plan.deletes),
         "conflicts": conflict_count,
         "ingestion_errors": ingestion_errors,
         "classification_errors": classification_errors,

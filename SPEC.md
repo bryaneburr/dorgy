@@ -307,6 +307,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 4 – Organization Engine | Batch orchestration, conflict handling, `.dorgy` state writing, dry-run/JSON/output/rollback support |
 | [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
 | [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
+| [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
 | [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [ ] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
@@ -445,3 +446,11 @@ The project will progress through the following phases. Update the status column
 - Executed `dorgy org --json` responses include context, counts, plan dumps, history events, and state metadata; dry-run parity retained.
 - CLI defaults are configurable via the new `cli` block in `config.yaml` with precedence verified for file/CLI/env overrides and corresponding tests.
 - JSON errors are emitted uniformly (`{"error": {"code": ..., "message": ...}}`), and new tests validate quiet defaults, summary output, and structured error responses.
+
+## Phase 5.5 – Watch Deletions & External Moves
+
+- Watch batches now normalize filesystem events into `WatchEvent` payloads so deletions, moves within the collection, and moves outside the watched roots are classified before ingestion runs.
+- `processing.watch.allow_deletions` (default `false`) and the `dorgy watch --allow-deletions` flag gate destructive state updates, ensuring opt-in semantics for dropping history/state entries.
+- `OperationPlan` and history logging include `DeleteOperation` entries with removal `kind` metadata; state repositories remove tracked files, append history, and write watch logs with deletion metrics when opt-in is enabled.
+- CLI summaries/JSON payloads expose `deleted` counts, executed removal metadata (`removals`), and suppression details (`suppressed_deletions`), with summary helpers highlighting destructive actions.
+- Added tests cover suppressed deletions, allowed deletions, internal moves, and external moves to confirm state persistence, history logging, and JSON surfaced details.
