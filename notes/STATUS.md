@@ -82,3 +82,11 @@
 - Added integration tests covering `dorgy search` filters/limits and `dorgy mv` execution, dry-run, and skip-conflict behaviour; introduced JSON assertions to guard new payload schemas.
 - Instrumented classification calls with per-request timing, added configurable concurrency (`processing.parallel_workers`), and wired run-time progress so slow LLM responses can be diagnosed while multiple requests run in parallel.
 - Next actions: continue Phase 6 polish (e.g., additional search filters, CLI UX refinements), validate progress output across terminals, and stage remaining Phase 6 scope before marking the phase complete.
+
+## 2025-10-24
+- Created `feature/ci-pipeline` branch and added `.github/workflows/ci.yml` to run Ruff lint/format checks, MyPy, and pytest via `uv` on pushes to `main` and pull requests.
+- Updated SPEC Phase 8 status plus AGENTS directives to point contributors to the new CI entry point and its expected tooling coverage.
+- Followed up on initial workflow failure by switching the sync step to `uv sync --extra dev --locked`, ensuring dev extras install cleanly in GitHub Actions.
+- Adjusted the MyPy step to `uv run mypy src main.py` so the workflow targets our packages explicitly and avoids empty invocations.
+- Resolved CI-only MyPy complaints by refining optional dependency shims for `python-magic` and `watchdog`, ensuring stub fallbacks use explicit ignores without clashing with module assignments.
+- Next actions: monitor initial workflow runs, then expand coverage (matrix/caching or additional hooks) once baseline stability is confirmed.

@@ -15,7 +15,14 @@ import click
 import yaml
 from click.core import ParameterSource
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskID,
+    TextColumn,
+    TimeElapsedColumn,
+)
 from rich.syntax import Syntax
 from rich.table import Table
 
@@ -69,7 +76,7 @@ class _ProgressTask:
     def __init__(
         self,
         progress: Progress | None,
-        task_id: int | None,
+        task_id: TaskID | None,
         *,
         enabled: bool,
         has_total: bool,
@@ -82,7 +89,7 @@ class _ProgressTask:
             enabled: Indicates whether progress output is active.
         """
         self._progress = progress
-        self._task_id = task_id
+        self._task_id: TaskID | None = task_id
         self._enabled = enabled
         self._has_total = has_total
 

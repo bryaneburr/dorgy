@@ -311,7 +311,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
 | [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
-| [ ] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
+| [~] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
 
 ## Work Tracking
 
@@ -465,3 +465,16 @@ The project will progress through the following phases. Update the status column
 - Expanded CLI configuration with `cli.move_conflict_strategy` and `cli.search_default_limit` so automation can tune defaults, alongside the new `cli.progress_enabled` toggle for UI instrumentation.
 - Watch JSON context now records `started_at`, `completed_at`, and `duration_seconds` alongside `batch_id`, enabling downstream automation to correlate processing timelines.
 - Configurable concurrency (`processing.parallel_workers`) allows ingestion and classification batches to issue multiple calls in parallel while logging per-request timings for diagnosis.
+
+## Phase 8 – Testing & Tooling
+
+### Goals
+- Keep automated quality gates aligned with local `uv` workflows so linting, typing, and tests run consistently before merges.
+- Ensure CI surfaces actionable failures for Ruff lint/format checks, MyPy typing, and `uv run pytest` while respecting the project's toolchain directives.
+- Extend documentation so contributors know where to enhance automation and add additional checks.
+
+### Progress Summary
+- Added GitHub Actions workflow `.github/workflows/ci.yml` that installs dependencies via `uv sync --extra dev --locked` and runs Ruff lint, Ruff format checks, `uv run mypy src main.py`, and pytest on pushes to `main` and pull requests.
+
+### Next Actions
+- Evaluate additional matrices (e.g., macOS, Windows) and caching once the core pipeline stabilizes, and wire future tooling upgrades through this workflow to keep automation authoritative.

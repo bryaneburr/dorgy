@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Tuple
 
 try:
-    import magic  # type: ignore
+    import magic  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - optional dependency
-    magic = None
+    magic = None  # type: ignore[assignment]
 
 
 class TypeDetector:
