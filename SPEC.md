@@ -101,9 +101,10 @@ Stored at `~/.dorgy/config.yaml`
 llm:
   provider: "local"  # local, openai, anthropic
   model: "llama3"    # for ollama
+  api_base_url: null # optional override for custom gateways
   api_key: null      # for cloud providers
-  temperature: 0.1
-  max_tokens: 2000
+  temperature: 1.0
+  max_tokens: 25000
 
 # Processing Options
 processing:
@@ -372,6 +373,7 @@ The project will progress through the following phases. Update the status column
 
 ### Progress Summary
 - Classification engine provides a heuristic fallback by default with optional DSPy integration (`DORGY_ENABLE_DSPY=1`) and JSON-backed caching.
+- LLM settings now wire provider/api_base_url/model/api_key directly into the DSPy client with defaults of temperature=1.0 and max_tokens=25000 for remote gateways.
 - CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
 
 ## Phase 4 – Organization Engine Plan

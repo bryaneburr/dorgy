@@ -95,7 +95,7 @@ def test_config_edit_applies_changes(tmp_path: Path, monkeypatch) -> None:
         Returns:
             str: Modified text with the temperature updated.
         """
-        return text.replace("temperature: 0.1", "temperature: 0.55")
+        return text.replace("temperature: 1.0", "temperature: 0.55")
 
     monkeypatch.setattr("dorgy.cli.click.edit", _mock_edit)
 

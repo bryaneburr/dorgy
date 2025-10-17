@@ -99,6 +99,9 @@ def test_flatten_for_env_round_trips_defaults() -> None:
     flat = flatten_for_env(DorgyConfig())
 
     assert flat["DORGY__LLM__PROVIDER"] == "local"
+    assert flat["DORGY__LLM__TEMPERATURE"] == "1.0"
+    assert flat["DORGY__LLM__MAX_TOKENS"] == "25000"
+    assert flat["DORGY__LLM__API_BASE_URL"] == "null"
     assert flat["DORGY__PROCESSING__MAX_FILE_SIZE_MB"] == "100"
     assert flat["DORGY__CLI__QUIET_DEFAULT"] == "False"
     assert flat["DORGY__CLI__SUMMARY_DEFAULT"] == "False"
@@ -112,3 +115,12 @@ def test_resolve_with_precedence_invalid_value_raises() -> None:
             defaults=DorgyConfig(),
             file_overrides={"processing": {"max_file_size_mb": "not-an-int"}},
         )
+
+
+def test_llm_defaults_updated() -> None:
+    """Ensure new LLM defaults are reflected in the configuration."""
+
+    settings = DorgyConfig().llm
+    assert settings.temperature == pytest.approx(1.0)
+    assert settings.max_tokens == 25_000
+    assert settings.api_base_url is None

@@ -98,7 +98,7 @@ def run_classification(
         )
 
     if pending_requests:
-        engine = ClassificationEngine()
+        engine = ClassificationEngine(config.llm)
         batch = engine.classify(pending_requests)
         errors.extend(batch.errors)
         for idx, decision, key in zip(pending_indices, batch.decisions, pending_keys, strict=False):

@@ -7,3 +7,4 @@
 - The heuristic fallback should remain deterministic; adjust `tests/test_classification_engine.py` if logic changes.
 - `ClassificationCache` persists decisions in `.dorgy/classifications.json`. Respect dry-run semantics and remember to guard writes behind the rename toggle.
 - Set `DORGY_ENABLE_DSPY=1` (with DSPy installed) to switch from the heuristic fallback to DSPy-backed classification.
+- DSPy integration pulls runtime settings from `DorgyConfig.llm`; when adding new parameters (e.g., custom gateways) keep the configuration model, CLI overrides, and LM wiring in sync.

@@ -20,6 +20,8 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
+from dorgy.config.models import LLMSettings
+
 from .models import (
     ClassificationBatch,
     ClassificationDecision,
@@ -45,11 +47,14 @@ class ClassificationEngine:
     optional dependency.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, settings: Optional[LLMSettings] = None) -> None:
         enable_dspy = os.getenv("DORGY_ENABLE_DSPY") == "1"
         self._has_dspy = dspy is not None and enable_dspy
+        self._settings = settings or LLMSettings()
         if self._has_dspy:
             try:
+                if not self._configure_language_model():
+                    raise NotImplementedError("Failed to configure LM")
                 self._program = self._build_program()
             except NotImplementedError:
                 LOGGER.info("DSPy program not yet implemented; using heuristic fallback instead.")
@@ -142,6 +147,34 @@ class ClassificationEngine:
     # ------------------------------------------------------------------ #
     # Internal helpers                                                   #
     # ------------------------------------------------------------------ #
+
+    def _configure_language_model(self) -> bool:
+        """Configure the DSPy language model according to LLM settings."""
+        if dspy is None:  # pragma: no cover - guarded by caller
+            return False
+
+        lm_kwargs: dict[str, object] = {
+            "model": self._settings.model,
+            "temperature": self._settings.temperature,
+            "max_tokens": self._settings.max_tokens,
+        }
+
+        if self._settings.api_key:
+            lm_kwargs["api_key"] = self._settings.api_key
+
+        if self._settings.api_base_url:
+            lm_kwargs["api_base"] = self._settings.api_base_url
+        elif self._settings.provider:
+            lm_kwargs["provider"] = self._settings.provider
+
+        try:
+            language_model = dspy.LM(**lm_kwargs)
+            dspy.settings.configure(lm=language_model)
+        except Exception as exc:  # pragma: no cover - DSPy misconfiguration
+            LOGGER.warning("Unable to configure DSPy language model: %s", exc, exc_info=True)
+            return False
+
+        return True
 
     def _classify_with_dspy(self, request: ClassificationRequest) -> ClassificationDecision:
         """Leverage DSPy program to classify the file.

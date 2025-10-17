@@ -19,6 +19,7 @@ class LLMSettings(DorgyBaseModel):
     Attributes:
         provider: Identifier for the language-model provider.
         model: Model name to target when issuing requests.
+        api_base_url: Optional override for the base URL when targeting custom gateways.
         temperature: Sampling temperature for generative calls.
         max_tokens: Maximum number of tokens in responses.
         api_key: Optional credential for hosted providers.
@@ -26,8 +27,9 @@ class LLMSettings(DorgyBaseModel):
 
     provider: str = "local"
     model: str = "llama3"
-    temperature: float = 0.1
-    max_tokens: int = 2_000
+    api_base_url: Optional[str] = None
+    temperature: float = 1.0
+    max_tokens: int = 25_000
     api_key: Optional[str] = None
 
 
