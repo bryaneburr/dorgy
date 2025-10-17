@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from threading import Lock
+from typing import Any, Callable, Iterable, Optional
 
 from dorgy.classification import (
     ClassificationBatch,
@@ -52,6 +53,11 @@ def run_classification(
     dry_run: bool,
     config: DorgyConfig,
     cache: Optional[ClassificationCache],
+    *,
+    on_progress: Optional[
+        Callable[[str, int, int, FileDescriptor, Optional[int], Optional[float]], None]
+    ] = None,
+    max_workers: int = 1,
 ) -> ClassificationBatch:
     """Execute the classification workflow with caching and fallbacks.
 
@@ -62,6 +68,11 @@ def run_classification(
         dry_run: Indicates whether the current run skips side effects.
         config: Loaded Dorgy configuration.
         cache: Optional classification cache instance.
+        on_progress: Optional callback invoked for classification progress events.
+            Receives the event type (``"start"`` or ``"complete"``), number of
+            descriptors completed so far, total descriptors, the descriptor itself,
+            the worker identifier (``None`` for cached results), and the elapsed
+            duration in seconds when available.
 
     Returns:
         ClassificationBatch: Decisions paired with any encountered errors.
@@ -81,11 +92,30 @@ def run_classification(
     pending_indices: list[int] = []
     pending_keys: list[Optional[str]] = []
 
+    total = len(descriptors)
+    progress_lock = Lock()
+    completed_count = 0
+
+    def notify(event: str, idx: int, worker_id: Optional[int], duration: Optional[float]) -> None:
+        nonlocal completed_count
+        if on_progress is None or idx >= total:
+            return
+        descriptor = descriptors[idx]
+        with progress_lock:
+            if event == "complete":
+                completed_count += 1
+                processed = completed_count
+            else:
+                processed = completed_count
+        on_progress(event, processed, total, descriptor, worker_id, duration)
+
     for index, descriptor in enumerate(descriptors):
         key = decision_cache_key(descriptor, root)
         cached = cache_instance.get(key) if cache_instance is not None and key is not None else None
         if cached is not None:
             decisions[index] = cached
+            notify("start", index, worker_id=None, duration=None)
+            notify("complete", index, worker_id=None, duration=0.0)
             continue
         pending_indices.append(index)
         pending_keys.append(key)
@@ -97,16 +127,33 @@ def run_classification(
             )
         )
 
+    max_workers = max(1, max_workers)
+
     if pending_requests:
         engine = ClassificationEngine(config.llm)
-        batch = engine.classify(pending_requests)
+
+        def _on_classification_progress(
+            local_index: int,
+            request: ClassificationRequest,
+            worker_id: int,
+            event: str,
+            duration: float | None,
+            error: Exception | None,
+        ) -> None:
+            original_index = pending_indices[local_index]
+            notify(event, original_index, worker_id, duration)
+
+        batch = engine.classify(
+            pending_requests,
+            max_workers=max_workers,
+            progress_callback=_on_classification_progress if on_progress else None,
+        )
         errors.extend(batch.errors)
         for idx, decision, key in zip(pending_indices, batch.decisions, pending_keys, strict=False):
-            if decision is None:
-                continue
-            decisions[idx] = decision
-            if not dry_run and cache_instance is not None and key is not None:
-                cache_instance.set(key, decision)
+            if decision is not None:
+                decisions[idx] = decision
+                if not dry_run and cache_instance is not None and key is not None:
+                    cache_instance.set(key, decision)
 
     if cache_instance is not None and not dry_run:
         cache_instance.save()

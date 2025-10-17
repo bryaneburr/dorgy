@@ -309,7 +309,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
 | [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
-| [ ] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
+| [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [ ] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
 
@@ -456,3 +456,12 @@ The project will progress through the following phases. Update the status column
 - `OperationPlan` and history logging include `DeleteOperation` entries with removal `kind` metadata; state repositories remove tracked files, append history, and write watch logs with deletion metrics when opt-in is enabled.
 - CLI summaries/JSON payloads expose `deleted` counts, executed removal metadata (`removals`), and suppression details (`suppressed_deletions`), with summary helpers highlighting destructive actions.
 - Added tests cover suppressed deletions, allowed deletions, internal moves, and external moves to confirm state persistence, history logging, and JSON surfaced details.
+
+## Phase 6 – CLI Surface
+
+- Introduced `dorgy search` with glob, tag, category, needs-review, and date-range filters plus JSON output that mirrors prior CLI schemas; defaults (including result limits) honor `cli.search_default_limit`.
+- Implemented `dorgy mv` using the organization executor to preserve staging/rollback guarantees while updating state/history; supports dry-run, JSON payloads, and configurable conflict strategies (append number, timestamp, skip).
+- Added Rich-powered progress indicators for `dorgy org` and `dorgy watch --once`, automatically disabled for JSON/quiet/non-TTY contexts and controllable via `cli.progress_enabled`.
+- Expanded CLI configuration with `cli.move_conflict_strategy` and `cli.search_default_limit` so automation can tune defaults, alongside the new `cli.progress_enabled` toggle for UI instrumentation.
+- Watch JSON context now records `started_at`, `completed_at`, and `duration_seconds` alongside `batch_id`, enabling downstream automation to correlate processing timelines.
+- Configurable concurrency (`processing.parallel_workers`) allows ingestion and classification batches to issue multiple calls in parallel while logging per-request timings for diagnosis.

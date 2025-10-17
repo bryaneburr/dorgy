@@ -3,9 +3,34 @@
 from __future__ import annotations
 
 import json
+import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional
+
+try:  # pragma: no cover - optional dependency
+    from docling.datamodel.base_models import InputFormat
+    from docling.document_converter import DocumentConverter
+
+    _DOCLING_LOG_NAMES = [
+        "docling",
+        "docling_core",
+        "docling.document_converter",
+        "docling.pipeline.standard_pdf_pipeline",
+        "docling.pipeline.standard_docx_pipeline",
+        "docling.backend.docling_parse_v4_backend",
+    ]
+    _DOCLING_DEFAULT_LEVELS: dict[str, int] = {}
+    for _name in _DOCLING_LOG_NAMES:
+        logger = logging.getLogger(_name)
+        _DOCLING_DEFAULT_LEVELS[_name] = logger.level
+        logger.setLevel(logging.ERROR)
+except ImportError:  # pragma: no cover
+    DocumentConverter = None
+    InputFormat = None
+    _DOCLING_LOG_NAMES = []
+    _DOCLING_DEFAULT_LEVELS = {}
 
 try:  # pragma: no cover - optional dependency
     from PIL import ExifTags, Image
@@ -16,6 +41,33 @@ except ImportError:  # pragma: no cover - executed when Pillow missing
 
 class MetadataExtractor:
     """Extract structured metadata and previews for a file."""
+
+    _DOC_PREVIEW_CHAR_LIMIT = 512
+    _DOC_PREVIEW_MAX_PAGES = 3
+
+    _DOC_MIME_MAP = {
+        "application/pdf": "pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+        "application/msword": "docx",
+        "application/vnd.ms-powerpoint": "pptx",
+        "application/vnd.ms-excel": "xlsx",
+        "text/markdown": "md",
+        "text/csv": "csv",
+        "text/html": "html",
+    }
+
+    def __init__(self) -> None:
+        """Initialise the metadata extractor and supporting converters."""
+
+        self._docling_converter: DocumentConverter | None = None
+        self._docling_lock = threading.Lock()
+        self._docling_preview_cache: dict[Path, str] = {}
+        if DocumentConverter is None:
+            self._docling_enabled = False
+        else:
+            self._docling_enabled = True
 
     def extract(
         self, path: Path, mime_type: str, sample_limit: int | None = None
@@ -78,6 +130,13 @@ class MetadataExtractor:
             except Exception:  # pragma: no cover - corrupt images
                 pass
 
+        docling_result = self._docling_metadata(path, mime_type, sample_limit)
+        if docling_result is not None:
+            extra_metadata, preview = docling_result
+            metadata.update(extra_metadata)
+            if preview:
+                self._docling_preview_cache[path] = preview
+
         return metadata
 
     def preview(self, path: Path, mime_type: str, sample_limit: int | None = None) -> Optional[str]:
@@ -99,4 +158,132 @@ class MetadataExtractor:
             except OSError:
                 return None
             return snippet or None
+        cached = self._docling_preview_cache.pop(path, None)
+        if cached:
+            limit = (
+                min(sample_limit, self._DOC_PREVIEW_CHAR_LIMIT)
+                if sample_limit
+                else self._DOC_PREVIEW_CHAR_LIMIT
+            )
+            return cached[:limit].strip() or None
+
+        docling_preview = self._docling_preview(path, mime_type, sample_limit)
+        if docling_preview:
+            return docling_preview
         return None
+
+    # ------------------------------------------------------------------ #
+    # Docling helpers                                                    #
+    # ------------------------------------------------------------------ #
+
+    def _docling_metadata(
+        self,
+        path: Path,
+        mime_type: str,
+        sample_limit: int | None,
+    ) -> tuple[dict[str, str], Optional[str]] | None:
+        """Extract metadata/preview using Docling when available."""
+
+        converter = self._get_docling_converter()
+        if converter is None:
+            return None
+
+        fmt = self._docling_format_for_mime(mime_type)
+        if fmt is None:
+            return None
+
+        original_levels = {}
+        for name in _DOCLING_LOG_NAMES:
+            logger = logging.getLogger(name)
+            original_levels[name] = logger.level
+            logger.setLevel(logging.CRITICAL)
+
+        try:
+            result = converter.convert(
+                str(path),
+                max_num_pages=self._DOC_PREVIEW_MAX_PAGES,
+            )
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            message = str(exc).lower()
+            if "password" in message or "incorrect password" in message:
+                logging.getLogger(__name__).info(
+                    "Skipping Docling extraction for password-protected file: %s", path
+                )
+                return (
+                    {"password_protected": "true", "mime_type": mime_type},
+                    "Password protected file",
+                )
+            logging.getLogger(__name__).debug("Docling conversion failed for %s: %s", path, exc)
+            return None
+        finally:
+            for name, level in original_levels.items():
+                logging.getLogger(name).setLevel(level)
+
+        if not getattr(result, "document", None):
+            return None
+
+        metadata: dict[str, str] = {}
+        try:
+            if hasattr(result.document, "num_pages"):
+                metadata["pages"] = str(result.document.num_pages)
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+        preview_text = result.document.export_to_text()
+        if not preview_text:
+            return metadata, None
+
+        limit = (
+            min(sample_limit, self._DOC_PREVIEW_CHAR_LIMIT)
+            if sample_limit
+            else self._DOC_PREVIEW_CHAR_LIMIT
+        )
+        snippet = preview_text.strip()[:limit].strip()
+        return metadata, snippet or None
+
+    def _docling_preview(
+        self,
+        path: Path,
+        mime_type: str,
+        sample_limit: int | None,
+    ) -> Optional[str]:
+        """Compute previews on demand when not captured during metadata extraction."""
+
+        result = self._docling_metadata(path, mime_type, sample_limit)
+        if result is None:
+            return None
+        metadata, preview = result
+        if metadata:
+            # When preview is requested before metadata, ensure docling metadata is
+            # cached for later reuse during the metadata phase.
+            self._docling_preview_cache[path] = preview or ""
+        return preview
+
+    def _docling_format_for_mime(self, mime_type: str) -> Optional[InputFormat]:
+        if not self._docling_enabled or InputFormat is None:
+            return None
+        mapped = self._DOC_MIME_MAP.get(mime_type.lower())
+        if mapped is None:
+            return None
+        try:
+            return InputFormat(mapped)
+        except ValueError:  # pragma: no cover - unsupported mapping
+            return None
+
+    def _get_docling_converter(self) -> Optional[DocumentConverter]:
+        if not self._docling_enabled or DocumentConverter is None:
+            return None
+        if self._docling_converter is not None:
+            return self._docling_converter
+        with self._docling_lock:
+            if self._docling_converter is None:
+                for name in (
+                    "docling",
+                    "docling_core",
+                    "docling.document_converter",
+                    "docling.pipeline.standard_pdf_pipeline",
+                    "docling.pipeline.standard_docx_pipeline",
+                ):
+                    logging.getLogger(name).setLevel(logging.ERROR)
+                self._docling_converter = DocumentConverter()
+        return self._docling_converter

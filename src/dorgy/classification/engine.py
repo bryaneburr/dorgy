@@ -12,8 +12,11 @@ import json
 import logging
 import os
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 try:  # pragma: no cover - optional dependency
     import dspy  # type: ignore
@@ -68,26 +71,128 @@ class ClassificationEngine:
         self._program = self._build_program()
         self._has_dspy = True
 
-    def classify(self, requests: Iterable[ClassificationRequest]) -> ClassificationBatch:
+    def classify(
+        self,
+        requests: Iterable[ClassificationRequest],
+        *,
+        max_workers: int = 1,
+        progress_callback: Optional[
+            Callable[
+                [
+                    int,
+                    ClassificationRequest,
+                    int,
+                    str,
+                    Optional[float],
+                    Optional[Exception],
+                ],
+                None,
+            ]
+        ] = None,
+    ) -> ClassificationBatch:
         """Run the DSPy program for each request.
 
         Args:
             requests: Iterable of classification requests to evaluate.
+            max_workers: Maximum number of concurrent worker threads.
+            progress_callback: Optional callback invoked for progress updates. The
+                callback receives the request index, original request, worker ID,
+                event (``"start"``/``"complete"``), elapsed duration, and any
+                raised exception.
 
         Returns:
             ClassificationBatch: Aggregated decisions and errors.
         """
-        batch = ClassificationBatch()
-        for request in requests:
+        requests = list(requests)
+        batch = ClassificationBatch(decisions=[None] * len(requests), errors=[])
+        if not requests:
+            return batch
+
+        worker_count = max(1, min(max_workers, len(requests)))
+
+        worker_lock = threading.Lock()
+        worker_ids: dict[int, int] = {}
+        worker_counter = 0
+
+        def _worker_id() -> int:
+            nonlocal worker_counter
+            thread_id = threading.get_ident()
+            with worker_lock:
+                worker = worker_ids.get(thread_id)
+                if worker is None:
+                    worker = worker_counter
+                    worker_ids[thread_id] = worker
+                    worker_counter += 1
+                return worker
+
+        def _notify_progress(
+            index: int,
+            request: ClassificationRequest,
+            worker_id: int,
+            event: str,
+            duration: Optional[float],
+            error: Optional[Exception],
+        ) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(index, request, worker_id, event, duration, error)
+            except Exception:  # pragma: no cover - progress callbacks are best effort
+                LOGGER.debug(
+                    "Progress callback failed for %s event=%s",
+                    request.descriptor.path,
+                    event,
+                )
+
+        def _classify_single(
+            index: int, request: ClassificationRequest
+        ) -> tuple[int, Optional[ClassificationDecision], Optional[str]]:
+            start = time.perf_counter()
+            worker_id = _worker_id()
+            _notify_progress(index, request, worker_id, "start", None, None)
             try:
                 if self._has_dspy and self._program is not None:
                     decision = self._classify_with_dspy(request)
                 else:
                     decision = self._fallback_classify(request)
-                batch.decisions.append(decision)
+                duration = time.perf_counter() - start
+                LOGGER.debug(
+                    "Classification completed for %s in %.2fs",
+                    request.descriptor.path,
+                    duration,
+                )
+                _notify_progress(index, request, worker_id, "complete", duration, None)
+                return index, decision, None
             except Exception as exc:  # pragma: no cover - defensive safeguard
-                batch.errors.append(f"{request.descriptor.path}: {exc}")
-                batch.decisions.append(None)
+                duration = time.perf_counter() - start
+                LOGGER.warning(
+                    "Classification failed for %s after %.2fs: %s",
+                    request.descriptor.path,
+                    duration,
+                    exc,
+                )
+                _notify_progress(index, request, worker_id, "complete", duration, exc)
+                return index, None, f"{request.descriptor.path}: {exc}"
+
+        if worker_count == 1:
+            for idx, request in enumerate(requests):
+                index, decision, error = _classify_single(idx, request)
+                batch.decisions[index] = decision
+                if error:
+                    batch.errors.append(error)
+            return batch
+
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            future_map = {
+                executor.submit(_classify_single, idx, request): idx
+                for idx, request in enumerate(requests)
+            }
+            for future in as_completed(future_map):
+                index, decision, error = future.result()
+                batch.decisions[index] = decision
+                if error:
+                    batch.errors.append(error)
+
         return batch
 
     def _build_program(self):
@@ -131,8 +236,8 @@ class ClassificationEngine:
         class DorgyClassifier(dspy.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.classifier = dspy.ChainOfThought(FileClassificationSignature)
-                self.renamer = dspy.ChainOfThought(FileRenamingSignature)
+                self.classifier = dspy.Predict(FileClassificationSignature)
+                self.renamer = dspy.Predict(FileRenamingSignature)
 
             def forward(self, payload: dict[str, str]):
                 classification = self.classifier(**payload)

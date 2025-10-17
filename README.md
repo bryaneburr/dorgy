@@ -47,17 +47,25 @@ uv run dorgy undo ./documents --dry-run --json
 uv run dorgy status ./documents
 uv run dorgy status ./documents --json
 
+# Search tracked metadata with filters or JSON output
+uv run dorgy search ./documents --name "*.pdf" --limit 10
+uv run dorgy search ./documents --json
+
+# Move or rename tracked files while updating state/history
+uv run dorgy mv ./documents/invoice.pdf ./documents/archive/invoice.pdf
+uv run dorgy mv ./documents/invoice.pdf ./documents/archive/ --conflict-strategy timestamp
+
+# Monitor directories once or continuously
+uv run dorgy watch ./inbox --once
+uv run dorgy watch ./inbox --debounce 1.5 --json
+uv run dorgy watch ./inbox --allow-deletions --json
+
 # Limit output to summary lines or silence non-errors
 uv run dorgy org ./documents --summary
 uv run dorgy status ./documents --quiet
 
 # Emit machine-readable execution payloads
 uv run dorgy org ./documents --json
-
-# Monitor directories once or continuously
-uv run dorgy watch ./inbox --once
-uv run dorgy watch ./inbox --debounce 1.5 --json
-uv run dorgy watch ./inbox --allow-deletions --json
 ```
 
 ### Configuration Notes
@@ -69,5 +77,6 @@ uv run dorgy watch ./inbox --allow-deletions --json
 - Automatic renaming can be toggled with `organization.rename_files`; set to `false` to keep original filenames while still recording suggestions in state.
 - Classification uses DSPy by default once you configure the `llm` block (provider/model/api_key or api_base_url). Set `DORGY_USE_FALLBACK=1` only if you intentionally want the lightweight heuristic classifier.
 - Organized files are relocated into category folders derived from classification decisions (e.g., `Documents/`); undo data is captured in `.dorgy/last_plan.json` and `dorgy.log`.
-- Use the `cli` section to control verbosity defaults (`quiet_default`, `summary_default`) and the default status history limit; environment overrides follow `DORGY__CLI__QUIET_DEFAULT`, etc.
-- Configure watch behaviour under `processing.watch` (debounce, batch sizing, error backoff, `allow_deletions`) to match your filesystem activity profile before running `dorgy watch`. Destructive removals are opt-in—either set `processing.watch.allow_deletions: true` or pass `--allow-deletions`; otherwise removals are suppressed and surfaced in watch notes/JSON.
+- Use the `cli` section to control verbosity defaults (`quiet_default`, `summary_default`), progress indicators (`progress_enabled`), default search limits (`search_default_limit`), move conflict handling (`move_conflict_strategy`), and the status history limit; environment overrides follow `DORGY__CLI__QUIET_DEFAULT`, etc.
+- Configure watch behaviour under `processing.watch` (debounce, batch sizing, error backoff, `allow_deletions`) to match your filesystem activity profile before running `dorgy watch`. Destructive removals are opt-in—either set `processing.watch.allow_deletions: true` or pass `--allow-deletions`; otherwise removals are suppressed and surfaced in watch notes/JSON, which now include batch `started_at`/`completed_at` timestamps.
+- Control ingestion/classification throughput via `processing.parallel_workers`; increase this value to issue multiple requests in parallel when your provider supports concurrent calls.
