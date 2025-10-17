@@ -24,7 +24,7 @@ jobs:
           python-version: "3.11"
 
       - name: Sync dependencies
-        run: uv sync --group dev --locked
+        run: uv sync --extra dev --locked
 
       - name: Run Ruff lint
         run: uv run ruff check .

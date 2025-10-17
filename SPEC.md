@@ -474,7 +474,7 @@ The project will progress through the following phases. Update the status column
 - Extend documentation so contributors know where to enhance automation and add additional checks.
 
 ### Progress Summary
-- Added GitHub Actions workflow `.github/workflows/ci.yml` that installs dependencies via `uv sync --group dev --locked` and runs Ruff lint, Ruff format checks, MyPy, and pytest on pushes to `main` and pull requests.
+- Added GitHub Actions workflow `.github/workflows/ci.yml` that installs dependencies via `uv sync --extra dev --locked` and runs Ruff lint, Ruff format checks, MyPy, and pytest on pushes to `main` and pull requests.
 
 ### Next Actions
 - Evaluate additional matrices (e.g., macOS, Windows) and caching once the core pipeline stabilizes, and wire future tooling upgrades through this workflow to keep automation authoritative.
