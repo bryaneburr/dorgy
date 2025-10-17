@@ -218,6 +218,7 @@ def test_cli_undo_json(tmp_path: Path) -> None:
     assert applied["rolled_back"] is True
     assert applied["plan"] is not None
 
+
 def test_cli_org_supports_output_relocation(tmp_path: Path) -> None:
     """Organizing into an output directory should copy files into the new root."""
 

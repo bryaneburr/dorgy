@@ -304,9 +304,7 @@ class OrganizerPlanner:
             conflict_applied = True
 
             if strategy == "skip":
-                note = (
-                    f"Skipped operation for {source} due to conflict policy 'skip'."
-                )
+                note = f"Skipped operation for {source} due to conflict policy 'skip'."
                 return _ConflictResolutionResult(destination=None, skipped=True, note=note)
 
             if strategy == "timestamp" and not timestamp_applied:
@@ -329,12 +327,12 @@ class OrganizerPlanner:
         if root is not None and root not in final_candidate.parents:
             final_candidate = root / final_candidate.name
 
-        note = None
+        note_text: str | None = None
         if conflict_applied:
-            note = f"Resolved conflict for {source} -> {final_candidate} using '{strategy}'."
+            note_text = f"Resolved conflict for {source} -> {final_candidate} using '{strategy}'."
 
         return _ConflictResolutionResult(
             destination=final_candidate,
             conflict_applied=conflict_applied,
-            note=note,
+            note=note_text,
         )

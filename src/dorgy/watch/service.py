@@ -7,10 +7,10 @@ import shutil
 import threading
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Literal, Optional
 
 try:  # pragma: no cover - optional dependency wiring
     from watchdog.events import FileSystemEvent, FileSystemEventHandler
@@ -37,9 +37,15 @@ from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
 from dorgy.ingestion.models import IngestionResult
 from dorgy.organization.executor import OperationExecutor
-from dorgy.organization.models import OperationPlan
+from dorgy.organization.models import DeleteOperation, OperationPlan
 from dorgy.organization.planner import OrganizerPlanner
-from dorgy.state import CollectionState, MissingStateError, OperationEvent, StateError, StateRepository
+from dorgy.state import (
+    CollectionState,
+    MissingStateError,
+    OperationEvent,
+    StateError,
+    StateRepository,
+)
 
 
 @dataclass(slots=True)
@@ -61,6 +67,8 @@ class WatchBatchResult:
         notes: Planner notes surfaced during plan construction.
         quarantine_paths: Paths that were moved into quarantine.
         triggered_paths: Paths that triggered the batch run.
+        delete_operations: Delete operations generated for this batch.
+        suppressed_deletions: Deletion candidates skipped due to configuration or dry-run.
     """
 
     root: Path
@@ -77,6 +85,48 @@ class WatchBatchResult:
     notes: list[str]
     quarantine_paths: list[Path]
     triggered_paths: list[Path]
+    delete_operations: list[DeleteOperation]
+    suppressed_deletions: list[dict[str, str]]
+
+
+@dataclass(slots=True)
+class WatchEvent:
+    """Normalized filesystem event consumed by the watch service.
+
+    Attributes:
+        kind: Event classification (`scan`, `created`, `modified`, `deleted`, or `moved`).
+        src: Source path associated with the event.
+        dest: Optional destination path for move events.
+        timestamp: Event timestamp in UTC.
+    """
+
+    kind: Literal["scan", "created", "modified", "deleted", "moved"]
+    src: Path
+    dest: Path | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass(slots=True)
+class RemovalRequest:
+    """Intermediate representation describing a potential state removal.
+
+    Attributes:
+        path: Original file path tracked within the collection root.
+        destination: Optional destination path when the file was moved.
+        reason: Human-readable reason for the removal.
+        kind: Removal category (`deleted`, `moved_out`, or `moved_within`).
+    """
+
+    path: Path
+    destination: Path | None
+    reason: str
+    kind: Literal["deleted", "moved_out", "moved_within"]
+
+    @property
+    def requires_confirmation(self) -> bool:
+        """Return whether this removal requires deletion opt-in safeguards."""
+
+        return self.kind != "moved_within"
 
 
 class WatchService:
@@ -92,6 +142,7 @@ class WatchService:
         dry_run: bool,
         recursive: bool,
         debounce_override: Optional[float] = None,
+        allow_deletions: bool = False,
     ) -> None:
         """Initialize the watch service.
 
@@ -103,6 +154,8 @@ class WatchService:
             dry_run: Whether to avoid filesystem mutations.
             recursive: Whether to monitor subdirectories.
             debounce_override: Optional debounce interval override in seconds.
+            allow_deletions: Whether to remove records when files are deleted or
+                moved outside monitored roots.
         """
 
         self._config = config
@@ -112,8 +165,8 @@ class WatchService:
         self._dry_run = dry_run
         self._recursive = recursive
         self._repository = StateRepository()
-        self._observer: object | None = None
-        self._queue: queue.Queue[tuple[Path | None, Path | None]] = queue.Queue()
+        self._observer: Any = None
+        self._queue: queue.Queue[tuple[Path | None, WatchEvent | None]] = queue.Queue()
         self._stop_event = threading.Event()
         self._pending_lock = threading.Lock()
         self._classification_caches: dict[Path, ClassificationCache] = {}
@@ -131,9 +184,12 @@ class WatchService:
             else None
         )
         self._initial_backoff = max(0.1, self._watch_settings.error_backoff_seconds)
-        self._max_backoff = max(self._initial_backoff, self._watch_settings.max_error_backoff_seconds)
+        self._max_backoff = max(
+            self._initial_backoff, self._watch_settings.max_error_backoff_seconds
+        )
         self._backoff: dict[Path, float] = defaultdict(lambda: self._initial_backoff)
         self._copy_mode = False
+        self._allow_deletions = allow_deletions
         if self._output is not None:
             if len(self._roots) != 1:
                 raise ValueError("--output requires a single source root.")
@@ -152,7 +208,7 @@ class WatchService:
 
         results: list[WatchBatchResult] = []
         for root in self._roots:
-            batch = self._run_batch(root, [root])
+            batch = self._run_batch(root, [WatchEvent(kind="scan", src=root)])
             if batch is not None:
                 results.append(batch)
         return results
@@ -166,7 +222,8 @@ class WatchService:
 
         if Observer is None:
             raise RuntimeError(
-                "watchdog is required for continuous watch mode. Install it via `uv pip install watchdog`."
+                "watchdog is required for continuous watch mode. "
+                "Install it via `uv pip install watchdog`."
             )
 
         if self._observer is not None:
@@ -208,7 +265,7 @@ class WatchService:
         Args:
             callback: Callable invoked for each processed batch.
         """
-        pending: dict[Path, set[Path]] = defaultdict(set)
+        pending: dict[Path, list[WatchEvent]] = defaultdict(list)
         batch_started_at: Optional[float] = None
         flush_deadline: Optional[float] = None
 
@@ -218,7 +275,7 @@ class WatchService:
                 timeout = max(0.0, flush_deadline - time.monotonic())
 
             try:
-                root, path = self._queue.get(timeout=timeout)
+                root, event = self._queue.get(timeout=timeout)
             except queue.Empty:
                 if pending:
                     self._flush_batches(pending, callback)
@@ -227,20 +284,15 @@ class WatchService:
                     flush_deadline = None
                 continue
 
-            if root is None or path is None:
+            if root is None or event is None:
                 break
 
-            if not path.exists() and not path.is_file():
-                continue
-            if self._repository.base_dirname in path.parts:
-                continue
-
-            pending[root].add(path)
+            pending[root].append(event)
             now = time.monotonic()
             if batch_started_at is None:
                 batch_started_at = now
             flush_deadline = now + self._debounce_seconds
-            total_items = sum(len(paths) for paths in pending.values())
+            total_items = sum(len(events) for events in pending.values())
             if total_items >= self._max_batch_items:
                 self._flush_batches(pending, callback)
                 pending.clear()
@@ -248,7 +300,10 @@ class WatchService:
                 flush_deadline = None
                 continue
 
-            if self._max_batch_interval is not None and (now - batch_started_at) >= self._max_batch_interval:
+            if (
+                self._max_batch_interval is not None
+                and (now - batch_started_at) >= self._max_batch_interval
+            ):
                 self._flush_batches(pending, callback)
                 pending.clear()
                 batch_started_at = None
@@ -256,23 +311,23 @@ class WatchService:
 
     def _flush_batches(
         self,
-        pending: dict[Path, set[Path]],
+        pending: dict[Path, list[WatchEvent]],
         callback: Callable[[WatchBatchResult], None],
     ) -> None:
-        """Flush pending paths by executing the organization pipeline.
+        """Flush pending events by executing the organization pipeline.
 
         Args:
-            pending: Mapping of roots to candidate paths awaiting processing.
+            pending: Mapping of roots to pending watch events awaiting processing.
             callback: Callable used to surface completed batch results.
         """
-        for root, paths in list(pending.items()):
-            if not paths:
+        for root, events in list(pending.items()):
+            if not events:
                 continue
-            triggered = sorted(paths)
+            triggered = list(events)
             try:
                 batch = self._run_batch(root, triggered)
             except Exception as exc:  # pragma: no cover - defensive branch
-                self._log_failure(root, triggered, exc)
+                self._log_failure(root, [event.src for event in triggered], exc)
                 backoff = self._backoff[root]
                 time.sleep(backoff)
                 self._backoff[root] = min(backoff * 2, self._max_backoff)
@@ -282,19 +337,21 @@ class WatchService:
             if batch is not None:
                 callback(batch)
 
-    def _run_batch(self, root: Path, paths: Iterable[Path]) -> Optional[WatchBatchResult]:
+    def _run_batch(
+        self, root: Path, watch_events: Iterable[WatchEvent]
+    ) -> Optional[WatchBatchResult]:
         """Execute ingestion, classification, and organization for a batch.
 
         Args:
             root: Monitored root producing the batch.
-            paths: Candidate paths that triggered the batch.
+            watch_events: Filesystem events that triggered the batch.
 
         Returns:
             Optional[WatchBatchResult]: Populated batch result, or ``None`` when no
-            descriptors were produced.
+            work was required.
         """
-        candidates = [path for path in paths if path.exists() or path.is_file()]
-        if not candidates:
+        event_list = list(watch_events)
+        if not event_list:
             return None
 
         source_root = root
@@ -306,91 +363,264 @@ class WatchService:
         state_dir = target_root / self._repository.base_dirname
         staging_dir = None if self._dry_run else state_dir / "staging"
 
-        cache = self._classification_caches.get(source_root)
-        if cache is None:
-            cache_path = state_dir / "classifications.json"
-            cache = ClassificationCache(cache_path)
-            self._classification_caches[source_root] = cache
+        triggered_paths_set: set[Path] = set()
+        ingestion_candidates: set[Path] = set()
+        removal_requests: dict[Path, RemovalRequest] = {}
 
-        max_size_bytes = None
-        if self._config.processing.max_file_size_mb > 0:
-            max_size_bytes = self._config.processing.max_file_size_mb * 1024 * 1024
+        for event in event_list:
+            if not self._should_ignore_path(event.src):
+                triggered_paths_set.add(event.src)
+            if event.dest is not None and not self._should_ignore_path(event.dest):
+                triggered_paths_set.add(event.dest)
 
-        scanner = DirectoryScanner(
-            recursive=self._recursive or self._config.processing.recurse_directories,
-            include_hidden=self._config.processing.process_hidden_files,
-            follow_symlinks=self._config.processing.follow_symlinks,
-            max_size_bytes=max_size_bytes,
-        )
+            if event.kind == "scan":
+                ingestion_candidates.add(event.src)
+                continue
 
-        pipeline = IngestionPipeline(
-            scanner=scanner,
-            detector=TypeDetector(),
-            hasher=HashComputer(),
-            extractor=MetadataExtractor(),
-            processing=self._config.processing,
-            staging_dir=staging_dir,
-            allow_writes=not self._dry_run,
-        )
+            if event.kind in {"created", "modified"}:
+                candidate = event.src
+                if not self._should_ignore_path(candidate) and candidate.exists():
+                    ingestion_candidates.add(candidate)
+                continue
 
-        result = pipeline.run(candidates)
-        classification_batch = run_classification(
-            result.processed,
-            self._prompt,
-            source_root,
-            self._dry_run,
-            self._config,
-            cache,
-        )
+            if event.kind == "deleted":
+                src_within = self._is_within_root(event.src, source_root)
+                if src_within and not self._should_ignore_path(event.src):
+                    removal_requests[event.src] = RemovalRequest(
+                        path=event.src,
+                        destination=None,
+                        reason="Filesystem reported deletion inside watched root.",
+                        kind="deleted",
+                    )
+                continue
 
-        paired = list(zip_decisions(classification_batch, result.processed))
-        confidence_threshold = self._config.ambiguity.confidence_threshold
-        for decision, descriptor in paired:
-            if decision is not None and decision.confidence < confidence_threshold:
-                decision.needs_review = True
-                if descriptor.path not in result.needs_review:
-                    result.needs_review.append(descriptor.path)
+            if event.kind == "moved":
+                dest = event.dest
+                src_within = self._is_within_root(event.src, source_root)
+                dest_within = dest is not None and self._is_within_root(dest, source_root)
+                if (
+                    dest_within
+                    and dest is not None
+                    and not self._should_ignore_path(dest)
+                    and dest.exists()
+                ):
+                    ingestion_candidates.add(dest)
+                if not src_within or self._should_ignore_path(event.src):
+                    continue
+                if dest_within and dest is not None and not self._should_ignore_path(dest):
+                    removal_requests[event.src] = RemovalRequest(
+                        path=event.src,
+                        destination=dest,
+                        reason=f"File moved within watched root to {dest.name}.",
+                        kind="moved_within",
+                    )
+                else:
+                    reason = "File moved outside watched roots."
+                    if dest is not None:
+                        reason = f"File moved outside watched roots to {dest}."
+                    removal_requests[event.src] = RemovalRequest(
+                        path=event.src,
+                        destination=dest,
+                        reason=reason,
+                        kind="moved_out",
+                    )
+                continue
 
+        ingestion_inputs = sorted(ingestion_candidates)
+        if not ingestion_inputs and not removal_requests:
+            return None
+
+        result = IngestionResult()
+        classification_batch = ClassificationBatch()
+        paired: list[tuple[Any, Any]] = []
         planner = OrganizerPlanner()
-        plan = planner.build_plan(
-            descriptors=[descriptor for _, descriptor in paired],
-            decisions=[decision for decision, _ in paired],
-            rename_enabled=self._config.organization.rename_files,
-            root=target_root,
-            conflict_strategy=self._config.organization.conflict_resolution,
-        )
-
-        rename_map = {operation.source: operation.destination for operation in plan.renames}
-        move_map = {operation.source: operation.destination for operation in plan.moves}
+        plan = OperationPlan()
         final_path_map: dict[Path, Path] = {}
-
         file_entries: list[dict[str, Any]] = []
 
-        for decision, descriptor in paired:
-            original_path = descriptor.path
-            rename_target = rename_map.get(original_path)
-            move_key = rename_target if rename_target is not None else original_path
-            move_target = move_map.get(move_key)
-            final_path = move_target or rename_target or original_path
-            final_path_map[original_path] = final_path
+        if ingestion_inputs:
+            cache = self._classification_caches.get(source_root)
+            if cache is None:
+                cache_path = state_dir / "classifications.json"
+                cache = ClassificationCache(cache_path)
+                self._classification_caches[source_root] = cache
 
-            file_entries.append(
-                {
-                    "original_path": original_path.as_posix(),
-                    "final_path": final_path.as_posix(),
-                    "descriptor": descriptor.model_dump(mode="json"),
-                    "classification": decision.model_dump(mode="json") if decision else None,
-                    "operations": {
-                        "rename": rename_target.as_posix() if rename_target else None,
-                        "move": move_target.as_posix() if move_target else None,
-                    },
-                }
+            max_size_bytes = None
+            if self._config.processing.max_file_size_mb > 0:
+                max_size_bytes = self._config.processing.max_file_size_mb * 1024 * 1024
+
+            scanner = DirectoryScanner(
+                recursive=self._recursive or self._config.processing.recurse_directories,
+                include_hidden=self._config.processing.process_hidden_files,
+                follow_symlinks=self._config.processing.follow_symlinks,
+                max_size_bytes=max_size_bytes,
             )
+
+            pipeline = IngestionPipeline(
+                scanner=scanner,
+                detector=TypeDetector(),
+                hasher=HashComputer(),
+                extractor=MetadataExtractor(),
+                processing=self._config.processing,
+                staging_dir=staging_dir,
+                allow_writes=not self._dry_run,
+            )
+
+            result = pipeline.run(ingestion_inputs)
+            classification_batch = run_classification(
+                result.processed,
+                self._prompt,
+                source_root,
+                self._dry_run,
+                self._config,
+                cache,
+            )
+
+            paired = list(zip_decisions(classification_batch, result.processed))
+            confidence_threshold = self._config.ambiguity.confidence_threshold
+            for decision, descriptor in paired:
+                if decision is not None and decision.confidence < confidence_threshold:
+                    decision.needs_review = True
+                    if descriptor.path not in result.needs_review:
+                        result.needs_review.append(descriptor.path)
+
+            plan = planner.build_plan(
+                descriptors=[descriptor for _, descriptor in paired],
+                decisions=[decision for decision, _ in paired],
+                rename_enabled=self._config.organization.rename_files,
+                root=target_root,
+                conflict_strategy=self._config.organization.conflict_resolution,
+            )
+
+            rename_map = {operation.source: operation.destination for operation in plan.renames}
+            move_map = {operation.source: operation.destination for operation in plan.moves}
+
+            for decision, descriptor in paired:
+                original_path = descriptor.path
+                rename_target = rename_map.get(original_path)
+                move_key = rename_target if rename_target is not None else original_path
+                move_target = move_map.get(move_key)
+                final_path = move_target or rename_target or original_path
+                final_path_map[original_path] = final_path
+
+                file_entries.append(
+                    {
+                        "original_path": original_path.as_posix(),
+                        "final_path": final_path.as_posix(),
+                        "descriptor": descriptor.model_dump(mode="json"),
+                        "classification": decision.model_dump(mode="json") if decision else None,
+                        "operations": {
+                            "rename": rename_target.as_posix() if rename_target else None,
+                            "move": move_target.as_posix() if move_target else None,
+                        },
+                    }
+                )
+        else:
+            plan = planner.build_plan(
+                descriptors=[],
+                decisions=[],
+                rename_enabled=self._config.organization.rename_files,
+                root=target_root,
+                conflict_strategy=self._config.organization.conflict_resolution,
+            )
+
+        delete_operations = [
+            DeleteOperation(
+                path=request.path,
+                reason=request.reason,
+                destination=request.destination,
+                kind=request.kind,
+            )
+            for request in removal_requests.values()
+        ]
+        if delete_operations:
+            plan.deletes.extend(delete_operations)
 
         counts = compute_org_counts(result, classification_batch, plan)
         errors = collect_error_payload(result, classification_batch)
 
+        triggered_paths = sorted(triggered_paths_set)
         batch_id = self._next_batch_id()
+        notes = list(plan.notes)
+
+        executed_requests: list[RemovalRequest] = []
+        suppressed_requests: list[tuple[RemovalRequest, str]] = []
+        for request in removal_requests.values():
+            if self._dry_run:
+                suppressed_requests.append((request, "dry_run"))
+                continue
+            if request.requires_confirmation and not self._allow_deletions:
+                suppressed_requests.append((request, "config"))
+                continue
+            executed_requests.append(request)
+
+        operations_by_path = {operation.path: operation for operation in delete_operations}
+        executed_delete_ops = [
+            operations_by_path[request.path]
+            for request in executed_requests
+            if request.path in operations_by_path
+        ]
+
+        counts["deletes"] = len(executed_delete_ops)
+
+        removals_payload: list[dict[str, Any]] = []
+        for delete_operation in delete_operations:
+            matching_request = removal_requests.get(delete_operation.path)
+            request_kind: str | None = (
+                matching_request.kind if matching_request is not None else None
+            )
+            executed = delete_operation in executed_delete_ops
+            removals_payload.append(
+                {
+                    "path": relative_to_collection(delete_operation.path, target_root),
+                    "reason": delete_operation.reason,
+                    "destination": delete_operation.destination.as_posix()
+                    if delete_operation.destination
+                    else None,
+                    "executed": executed,
+                    "kind": request_kind,
+                }
+            )
+
+        suppressed_payload: list[dict[str, str]] = []
+        for request, cause in suppressed_requests:
+            suppressed_payload.append(
+                {
+                    "path": relative_to_collection(request.path, target_root),
+                    "reason": request.reason,
+                    "cause": cause,
+                    "destination": request.destination.as_posix() if request.destination else "",
+                    "kind": request.kind,
+                }
+            )
+
+        if suppressed_requests:
+            config_suppressed = [req for req, cause in suppressed_requests if cause == "config"]
+            dryrun_suppressed = [req for req, cause in suppressed_requests if cause == "dry_run"]
+            if config_suppressed:
+                relative_list = ", ".join(
+                    sorted(
+                        relative_to_collection(req.path, target_root) for req in config_suppressed
+                    )
+                )
+                config_message = (
+                    f"Suppressed {len(config_suppressed)} deletion(s); "
+                    "enable processing.watch.allow_deletions or pass --allow-deletions "
+                    f"to remove: {relative_list}"
+                )
+                notes.append(config_message)
+            if dryrun_suppressed:
+                relative_list = ", ".join(
+                    sorted(
+                        relative_to_collection(req.path, target_root) for req in dryrun_suppressed
+                    )
+                )
+                dryrun_message = (
+                    f"Dry-run prevented applying {len(dryrun_suppressed)} deletion(s): "
+                    f"{relative_list}"
+                )
+                notes.append(dryrun_message)
+
         json_payload: dict[str, Any] = {
             "context": {
                 "batch_id": batch_id,
@@ -399,13 +629,16 @@ class WatchService:
                 "copy_mode": self._copy_mode,
                 "dry_run": self._dry_run,
                 "prompt": self._prompt,
-                "triggered_paths": [path.as_posix() for path in candidates],
+                "allow_deletions": self._allow_deletions,
+                "triggered_paths": [path.as_posix() for path in triggered_paths],
             },
             "counts": counts,
             "plan": plan.model_dump(mode="json"),
             "files": file_entries,
-            "notes": list(plan.notes),
+            "notes": notes,
             "errors": errors,
+            "removals": removals_payload,
+            "suppressed_deletions": suppressed_payload,
         }
 
         if self._dry_run:
@@ -421,9 +654,11 @@ class WatchService:
                 counts=counts,
                 errors=errors,
                 json_payload=json_payload,
-                notes=list(plan.notes),
+                notes=notes,
                 quarantine_paths=[],
-                triggered_paths=[path for path in candidates],
+                triggered_paths=triggered_paths,
+                delete_operations=list(delete_operations),
+                suppressed_deletions=suppressed_payload,
             )
 
         state_dir = self._repository.initialize(target_root)
@@ -450,7 +685,9 @@ class WatchService:
 
         snapshot = build_original_snapshot([descriptor for _, descriptor in paired], source_root)
         try:
-            existing_snapshot = self._repository.load_original_structure(target_root) or {"entries": []}
+            existing_snapshot = self._repository.load_original_structure(target_root) or {
+                "entries": []
+            }
         except StateError:
             existing_snapshot = {"entries": []}
         existing_entries = {
@@ -475,7 +712,7 @@ class WatchService:
             source_root=source_root,
         )
 
-        events: list[OperationEvent] = executor.apply(plan, target_root)
+        operation_events: list[OperationEvent] = executor.apply(plan, target_root)
 
         for decision, descriptor in paired:
             original_path = descriptor.path
@@ -490,20 +727,52 @@ class WatchService:
             state.files.pop(old_relative, None)
             state.files[record.path] = record
 
+        removed_relatives: list[str] = []
+        for request in executed_requests:
+            relative = relative_to_collection(request.path, target_root)
+            if state.files.pop(relative, None) is not None:
+                removed_relatives.append(relative)
+
+        delete_events: list[OperationEvent] = []
+        for request in executed_requests:
+            matched_operation: DeleteOperation | None = operations_by_path.get(request.path)
+            destination_path = (
+                matched_operation.destination
+                if matched_operation is not None
+                else request.destination
+            )
+            delete_events.append(
+                OperationEvent(
+                    timestamp=datetime.now(timezone.utc),
+                    operation="delete",
+                    source=relative_to_collection(request.path, target_root),
+                    destination=relative_to_collection(destination_path, target_root)
+                    if destination_path is not None
+                    else None,
+                    notes=[request.reason],
+                )
+            )
+
+        operation_events.extend(delete_events)
+
         self._repository.save(target_root, state)
-        if events:
-            self._repository.append_history(target_root, events)
+        if operation_events:
+            self._repository.append_history(target_root, operation_events)
 
         log_path = state_dir / "watch.log"
         try:
             with log_path.open("a", encoding="utf-8") as log_file:
                 timestamp = datetime.now(timezone.utc).isoformat()
-                log_file.write(
+                summary_line = (
                     f"[{timestamp}] batch={batch_id} processed={len(result.processed)} "
-                    f"needs_review={len(result.needs_review)} quarantined={len(result.quarantined)} "
-                    f"renames={len(plan.renames)} moves={len(plan.moves)} "
+                    f"needs_review={len(result.needs_review)} "
+                    f"quarantined={len(result.quarantined)} "
+                    f"renames={len(plan.renames)} "
+                    f"moves={len(plan.moves)} "
+                    f"deletes={len(executed_delete_ops)} "
                     f"errors={len(result.errors) + len(classification_batch.errors)}\n"
                 )
+                log_file.write(summary_line)
                 for error in result.errors:
                     log_file.write(f"  error: {error}\n")
                 for error in classification_batch.errors:
@@ -512,16 +781,28 @@ class WatchService:
                     log_file.write(f"  rename: {renamed.source} -> {renamed.destination}\n")
                 for moved in plan.moves:
                     log_file.write(f"  move: {moved.source} -> {moved.destination}\n")
+                for delete_op in executed_delete_ops:
+                    destination = (
+                        delete_op.destination.as_posix()
+                        if delete_op.destination is not None
+                        else "<removed>"
+                    )
+                    delete_line = (
+                        f"  delete[{delete_op.kind}]: {delete_op.path.as_posix()} -> "
+                        f"{destination}\n"
+                    )
+                    log_file.write(delete_line)
         except OSError:
             pass
 
-        json_payload["history"] = [event.model_dump(mode="json") for event in events]
+        json_payload["history"] = [event.model_dump(mode="json") for event in operation_events]
         json_payload["state"] = {
             "path": str(state_dir / "state.json"),
             "files_tracked": len(state.files),
         }
         json_payload["log_path"] = str(log_path)
         json_payload["quarantine"] = [path.as_posix() for path in result.quarantined]
+        json_payload["removed_records"] = removed_relatives
 
         return WatchBatchResult(
             root=source_root,
@@ -531,13 +812,15 @@ class WatchService:
             ingestion=result,
             classification=classification_batch,
             plan=plan,
-            events=events,
+            events=operation_events,
             counts=counts,
             errors=errors,
             json_payload=json_payload,
-            notes=list(plan.notes),
+            notes=notes,
             quarantine_paths=list(result.quarantined),
-            triggered_paths=[path for path in candidates],
+            triggered_paths=triggered_paths,
+            delete_operations=list(delete_operations),
+            suppressed_deletions=suppressed_payload,
         )
 
     def _next_batch_id(self) -> int:
@@ -562,11 +845,27 @@ class WatchService:
             with (state_dir / "watch.log").open("a", encoding="utf-8") as log_file:
                 timestamp = datetime.now(timezone.utc).isoformat()
                 joined = ", ".join(path.as_posix() for path in paths)
-                log_file.write(
-                    f"[{timestamp}] batch_error paths=[{joined}] error={exc.__class__.__name__}: {exc}\n"
+                error_line = (
+                    f"[{timestamp}] batch_error paths=[{joined}] "
+                    f"error={exc.__class__.__name__}: {exc}\n"
                 )
+                log_file.write(error_line)
         except OSError:
             pass
+
+    def _should_ignore_path(self, path: Path) -> bool:
+        """Return whether ``path`` should be ignored for watch processing."""
+
+        return self._repository.base_dirname in path.parts
+
+    def _is_within_root(self, path: Path, root: Path) -> bool:
+        """Return whether ``path`` resides within ``root``."""
+
+        try:
+            path.resolve().relative_to(root.resolve())
+            return True
+        except (ValueError, FileNotFoundError):
+            return False
 
 
 class _WatchEventHandler(FileSystemEventHandler):
@@ -575,7 +874,7 @@ class _WatchEventHandler(FileSystemEventHandler):
     def __init__(
         self,
         root: Path,
-        queue_handle: queue.Queue[tuple[Path | None, Path | None]],
+        queue_handle: queue.Queue[tuple[Path | None, WatchEvent | None]],
         state_dirname: str,
     ) -> None:
         self._root = root
@@ -584,21 +883,51 @@ class _WatchEventHandler(FileSystemEventHandler):
 
     def on_created(self, event: FileSystemEvent) -> None:
         """Handle a filesystem create event."""
-        self._enqueue(event)
+        if event.is_directory:
+            return
+        self._enqueue(kind="created", src_path=event.src_path)
 
     def on_modified(self, event: FileSystemEvent) -> None:
         """Handle a filesystem modify event."""
-        self._enqueue(event)
+        if event.is_directory:
+            return
+        self._enqueue(kind="modified", src_path=event.src_path)
+
+    def on_deleted(self, event: FileSystemEvent) -> None:  # pragma: no cover - watchdog-specific
+        """Handle a filesystem delete event."""
+        if event.is_directory:
+            return
+        self._enqueue(kind="deleted", src_path=event.src_path)
 
     def on_moved(self, event: FileSystemEvent) -> None:  # pragma: no cover - watchdog-specific
         """Handle a filesystem move event."""
-        self._enqueue(event)
-
-    def _enqueue(self, event: FileSystemEvent) -> None:
-        """Queue filesystem events for downstream processing."""
         if event.is_directory:
             return
-        path = Path(event.src_path).expanduser()
-        if self._state_dirname in path.parts:
+        self._enqueue(
+            kind="moved", src_path=event.src_path, dest_path=getattr(event, "dest_path", None)
+        )
+
+    def _enqueue(
+        self,
+        *,
+        kind: Literal["created", "modified", "deleted", "moved"],
+        src_path: str,
+        dest_path: str | None = None,
+    ) -> None:
+        """Queue filesystem events for downstream processing."""
+
+        src = Path(src_path).expanduser()
+        if self._state_dirname in src.parts:
             return
-        self._queue.put((self._root, path))
+        src = src.resolve(strict=False)
+
+        dest: Path | None = None
+        if dest_path is not None:
+            candidate = Path(dest_path).expanduser()
+            if self._state_dirname in candidate.parts:
+                dest = None
+            else:
+                dest = candidate.resolve(strict=False)
+
+        event = WatchEvent(kind=kind, src=src, dest=dest)
+        self._queue.put((self._root, event))

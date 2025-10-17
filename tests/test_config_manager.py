@@ -64,8 +64,6 @@ def test_resolve_with_precedence_respects_order(
     manager.save({"llm": {"model": "gpt-4"}, "processing": {"max_file_size_mb": 64}})
 
     env = {"DORGY__LLM__TEMPERATURE": "0.7"}
-    cli = {"llm.temperature": 0.2}
-
     cli_overrides = {
         "llm.temperature": 0.2,
         "cli.quiet_default": True,

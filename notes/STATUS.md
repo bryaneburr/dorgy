@@ -68,3 +68,9 @@
 - Added `WatchService` to batch filesystem events, reuse the ingestion/classification/organization pipeline, and persist incremental updates to `.dorgy/state.json`, `.dorgy/history.jsonl`, and `.dorgy/watch.log`.
 - Documented the workflow in SPEC/README/AGENTS (including module-specific guidance) and introduced CLI integration tests in `tests/test_cli_watch.py` covering one-shot and JSON flows.
 - Updated SPEC phase tracking and configuration snippets and refreshed README highlights to surface the new watch behaviour.
+
+## 2025-10-22
+- Delivered Phase 5.5 watch deletions/external moves: normalized events (`WatchEvent`), added `DeleteOperation` support, and wired state/history/log updates with removal notes plus JSON `removals`/`suppressed_deletions`.
+- Introduced `processing.watch.allow_deletions` (default `false`) and `dorgy watch --allow-deletions`; CLI summaries now surface `deleted` counts and warn on executed or suppressed removals.
+- Expanded watch tests to cover suppressed deletions, opt-in deletions, internal moves, and moves outside the collection, then refreshed README/SPEC/AGENTS guidance.
+- Next actions: roll the enhanced watch metadata into upcoming Phase 6 CLI workflows (`search`, `mv`, extended status) and align automation documentation as new commands come online.

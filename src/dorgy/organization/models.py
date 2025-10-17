@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -52,10 +52,28 @@ class MetadataOperation(BaseModel):
     remove: List[str] = Field(default_factory=list)
 
 
+class DeleteOperation(BaseModel):
+    """Represents removal of a previously tracked file.
+
+    Attributes:
+        path: Original file path within the collection root.
+        reason: Optional explanation describing why the file was removed.
+        destination: Optional destination path when the file was moved outside the
+            collection root.
+        kind: Removal category (`deleted`, `moved_out`, or `moved_within`).
+    """
+
+    path: Path
+    reason: Optional[str] = None
+    destination: Optional[Path] = None
+    kind: Literal["deleted", "moved_out", "moved_within"] = "deleted"
+
+
 class OperationPlan(BaseModel):
     """Aggregated organization plan."""
 
     renames: List[RenameOperation] = Field(default_factory=list)
     moves: List[MoveOperation] = Field(default_factory=list)
     metadata_updates: List[MetadataOperation] = Field(default_factory=list)
+    deletes: List[DeleteOperation] = Field(default_factory=list)
     notes: List[str] = Field(default_factory=list)

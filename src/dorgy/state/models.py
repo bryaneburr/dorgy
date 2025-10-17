@@ -39,18 +39,18 @@ class OperationEvent(BaseModel):
 
     Attributes:
         timestamp: Moment the operation executed.
-        operation: Operation type identifier (rename or move).
+        operation: Operation type identifier (rename, move, or delete).
         source: Original path for the entry (relative to the collection when possible).
-        destination: Path after applying the operation.
+        destination: Path after applying the operation, when applicable.
         conflict_strategy: Conflict policy applied while executing the operation.
         conflict_applied: Indicates whether a conflict was encountered.
         notes: Optional freeform notes about the event.
     """
 
     timestamp: datetime
-    operation: Literal["rename", "move"]
+    operation: Literal["rename", "move", "delete"]
     source: str
-    destination: str
+    destination: Optional[str] = None
     conflict_strategy: Optional[str] = None
     conflict_applied: bool = False
     notes: List[str] = Field(default_factory=list)
