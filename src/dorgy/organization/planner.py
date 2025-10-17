@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional
 
 from dorgy.classification.models import ClassificationDecision
 from dorgy.ingestion.models import FileDescriptor
@@ -36,6 +36,7 @@ class OrganizerPlanner:
         root: Optional[Path] = None,
         conflict_strategy: str = "append_number",
         timestamp_provider: Optional[Callable[[], datetime]] = None,
+        destination_map: Optional[Dict[Path, Path]] = None,
     ) -> OperationPlan:
         """Produce an operation plan based on descriptors and decisions.
 
@@ -47,6 +48,9 @@ class OrganizerPlanner:
             conflict_strategy: Strategy used to resolve naming collisions.
             timestamp_provider: Callable returning the current timestamp for
                 timestamp-based conflict resolution. Defaults to UTC `datetime.now`.
+            destination_map: Optional mapping of descriptor paths to desired destinations
+                (relative to ``root``). When provided, the planner prefers these targets
+                over category-based placement.
 
         Returns:
             OperationPlan: Plan containing rename and metadata updates.
@@ -61,7 +65,62 @@ class OrganizerPlanner:
         rename_map: dict[Path, Path] = {}
         effective_timestamp_provider = timestamp_provider or (lambda: datetime.now(timezone.utc))
 
-        for descriptor, decision in zip(descriptors, decisions, strict=False):
+        descriptor_list = list(descriptors)
+        decision_list = list(decisions)
+
+        if destination_map and root is not None:
+            normalized_map: dict[Path, Path] = {}
+            for descriptor in descriptor_list:
+                dest = destination_map.get(descriptor.path)
+                if dest is None:
+                    continue
+                if dest.is_absolute():
+                    try:
+                        dest = dest.relative_to(root)
+                    except ValueError:
+                        dest = dest.relative_to(dest.anchor)
+                normalized_map[descriptor.path] = (root / dest).resolve()
+
+            # Metadata updates referencing final destinations.
+            for index, descriptor in enumerate(descriptor_list):
+                decision = decision_list[index] if index < len(decision_list) else None
+                if decision is None:
+                    continue
+                metadata_path = normalized_map.get(descriptor.path, descriptor.path)
+                metadata = self._build_metadata_operation(metadata_path, decision)
+                if metadata is not None:
+                    plan.metadata_updates.append(metadata)
+
+            for descriptor in descriptor_list:
+                target = normalized_map.get(descriptor.path)
+                if target is None:
+                    continue
+                resolution = self._resolve_conflict(
+                    descriptor.path,
+                    target,
+                    root,
+                    occupied_destinations,
+                    normalized_strategy,
+                    effective_timestamp_provider,
+                )
+                destination = resolution.destination
+                if destination is None or destination == descriptor.path:
+                    continue
+                plan.moves.append(
+                    MoveOperation(
+                        source=descriptor.path,
+                        destination=destination,
+                        reasoning="Structure planner proposal",
+                        conflict_strategy=normalized_strategy,
+                        conflict_applied=resolution.conflict_applied,
+                    )
+                )
+                occupied_destinations.add(destination)
+                if resolution.note:
+                    plan.notes.append(resolution.note)
+            return plan
+
+        for descriptor, decision in zip(descriptor_list, decision_list, strict=False):
             if decision is None:
                 continue
 
@@ -139,6 +198,11 @@ class OrganizerPlanner:
 
         if not rename_enabled or not suggestion:
             return None, None
+
+        suffix = path.suffix
+        suggestion = suggestion.strip()
+        if suffix and suggestion.lower().endswith(suffix.lower()):
+            suggestion = suggestion[: -len(suffix)]
 
         sanitized = self._sanitize_filename(suggestion)
         if not sanitized:

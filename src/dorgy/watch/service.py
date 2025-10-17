@@ -354,6 +354,7 @@ class WatchService:
         if not event_list:
             return None
 
+        batch_started_at = datetime.now(timezone.utc)
         source_root = root
         target_root = self._output if self._output is not None else source_root
 
@@ -467,6 +468,7 @@ class WatchService:
             )
 
             result = pipeline.run(ingestion_inputs)
+            parallel_workers = max(1, self._config.processing.parallel_workers)
             classification_batch = run_classification(
                 result.processed,
                 self._prompt,
@@ -474,6 +476,8 @@ class WatchService:
                 self._dry_run,
                 self._config,
                 cache,
+                on_progress=None,
+                max_workers=parallel_workers,
             )
 
             paired = list(zip_decisions(classification_batch, result.processed))
@@ -631,6 +635,7 @@ class WatchService:
                 "prompt": self._prompt,
                 "allow_deletions": self._allow_deletions,
                 "triggered_paths": [path.as_posix() for path in triggered_paths],
+                "started_at": batch_started_at.isoformat(),
             },
             "counts": counts,
             "plan": plan.model_dump(mode="json"),
@@ -642,6 +647,10 @@ class WatchService:
         }
 
         if self._dry_run:
+            batch_completed_at = datetime.now(timezone.utc)
+            duration_seconds = round((batch_completed_at - batch_started_at).total_seconds(), 3)
+            json_payload["context"]["completed_at"] = batch_completed_at.isoformat()
+            json_payload["context"]["duration_seconds"] = duration_seconds
             return WatchBatchResult(
                 root=source_root,
                 target_root=target_root,
@@ -803,6 +812,11 @@ class WatchService:
         json_payload["log_path"] = str(log_path)
         json_payload["quarantine"] = [path.as_posix() for path in result.quarantined]
         json_payload["removed_records"] = removed_relatives
+
+        batch_completed_at = datetime.now(timezone.utc)
+        duration_seconds = round((batch_completed_at - batch_started_at).total_seconds(), 3)
+        json_payload["context"]["completed_at"] = batch_completed_at.isoformat()
+        json_payload["context"]["duration_seconds"] = duration_seconds
 
         return WatchBatchResult(
             root=source_root,

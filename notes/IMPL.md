@@ -144,3 +144,105 @@
 - Draft CLI UX (flags/messages) and circulate for review before wiring destructive behavior.
 
 
+## Phase 6 – CLI Surface Implementation Plan
+
+### Objectives
+- Expose a cohesive CLI that covers day-to-day workflows (`org`, `watch`, `search`, `mv`, `status`, `undo`, `config`) with consistent option parsing, shared output helpers, and JSON/quiet/summary parity.
+- Ensure commands operate on per-collection state without requiring manual `.dorgy` inspection, and provide actionable errors when prerequisites (state, config, LLM availability) are missing.
+- Establish reusable CLI tooling (context managers, decorators, prompt helpers) so subsequent phases can plug in additional functionality without duplicating boilerplate.
+
+### Scope & Milestones
+1. **Command Baseline & Option Harmonization**
+   - Audit existing command signatures; align short/long flags (`--json`, `--quiet`, `--summary`, `--dry-run`, `--output`) and ensure help text follows the shared conventions.
+   - Introduce a `dorgy.cli_options` module housing reusable Click option factories and validation helpers (mutually exclusive flags, path resolution, config fallbacks).
+   - Update command docstrings/help examples to reflect the standard flag set.
+
+2. **`dorgy search` Implementation**
+   - Deliver read-only search that queries the existing `.dorgy/state.json` (Phase 7 will swap in semantic index).
+   - Support filters for filename glob, tags, categories, needs-review, and modified date range.
+   - Provide paginated/limited output with `--json`, `--summary`, and default Rich table rendering (fallback to plain text if Rich unavailable).
+   - Add integration tests covering empty state, basic matches, combined filters, and JSON output.
+
+3. **`dorgy mv` Implementation**
+   - Implement move/rename command that updates the filesystem, state records, and history using the organization executor.
+   - Support `--dry-run`, `--json`, conflict strategies (reusing organization planner logic), and validation for cross-collection moves.
+   - Ensure undo entries capture mv operations, and CLI prompts highlight irreversible actions when targeting outside the collection.
+   - Test cases: rename within collection, move to new folder, conflict resolution, invalid targets.
+
+4. **Progress & Status Enhancements**
+   - Wire Rich/TQDM progress bars for long-running `org` and `watch --once` operations (configurable via verbosity/quiet flags).
+   - Surface command summaries back through the existing `_emit_message` helpers while respecting quiet/summary defaults.
+   - Extend watch JSON payload schema/documentation to include progress timestamps and batch identifiers consumed by future automation.
+   - Add debug-level timing instrumentation around classification calls to highlight slow provider responses.
+
+5. **Configuration & Defaults**
+   - Expand config schema with CLI defaults relevant to Phase 6 (e.g., `cli.move_conflict_strategy`, `cli.search_default_limit`, `cli.progress_enabled`).
+   - Update `ConfigManager` precedence tests and README/SPEC documentation to describe new keys.
+   - Ensure `flatten_for_env` exposes new settings and CLI commands respect them via shared option factories.
+   - Introduce `processing.parallel_workers` so ingestion and classification can scale concurrency when providers and hardware allow.
+
+6. **Documentation & Coordination**
+   - Refresh README “Current CLI Highlights” with examples for `search` and `mv`, including JSON and quiet invocations.
+   - Add or update AGENTS.md entries for CLI modules describing shared helpers, option factories, and progress UI expectations.
+   - Capture implementation notes and dependencies in `notes/STATUS.md` after each working session.
+
+### Deliverables
+- Updated CLI package with standardized options/utilities and implemented `search`/`mv`.
+- New/updated tests: CLI integration (`tests/test_cli.py`, `tests/test_cli_search.py`, `tests/test_cli_mv.py`), unit tests for option helpers, config tests for new defaults.
+- Documentation updates across README, SPEC Phase 6 section, and AGENTS files.
+- Progress instrumentation (Rich/TQDM) behind configuration toggles.
+
+### Dependencies & Sequencing
+- Requires Phase 5.5 deletions work merged (state/history schema) to avoid conflicts while adding move logic.
+- Search relies on the structure of `.dorgy/state.json`; any schema adjustments must land before semantic indexing (Phase 7).
+- Progress feedback hooks should reuse output helpers introduced in Phase 4.5; ensure any new Rich dependencies are optional and documented.
+
+### Risks & Mitigations
+- **CLI Option Drift:** Shared option factories reduce duplication; add unit tests that assert option signatures across commands.
+- **State Corruption via `mv`:** Reuse existing executor/history pipeline with thorough tests; guard against cross-device moves with explicit error messaging.
+- **Progress UI Failures in Headless Environments:** Detect Rich availability and terminal capabilities, falling back to plain text with a warning.
+- **Config Backwards Compatibility:** Default new config keys to no-op values (e.g., `progress_enabled: true`) and log warnings rather than failing when unset.
+
+### Success Criteria
+- Running `uv run dorgy --help` lists all primary commands with cohesive help text and consistent flags.
+- `dorgy search` and `dorgy mv` operate end-to-end (filesystem + state/history) with passing integration tests and documented examples.
+- Progress indicators appear for long-running operations when supported, and can be disabled via config/flags.
+- Documentation (README, SPEC Phase 6, AGENTS) accurately reflects the CLI surface and configuration knobs.
+
+## Phase 7 – Search & Metadata APIs Implementation Plan
+
+### Objectives
+- Introduce a persistent metadata/search service powered by ChromaDB so collections support semantic, tag, and temporal queries beyond the existing state JSON.
+- Keep the CLI surface cohesive by extending `dorgy search` and related commands to leverage the new index while preserving backward-compatible JSON schemas.
+- Ensure metadata updates propagate across organization, watch, and manual moves so the search index stays consistent without manual rebuilds.
+
+### Scope & Milestones
+1. **Indexing Foundations**
+   - Add a ChromaDB client wrapper (`dorgy.search`) with configuration (path, embedding model, batch size).
+   - Extend ingestion/organization workflows to upsert descriptors into the index (text content, tags, categories, hashes, timestamps).
+   - Persist index metadata per collection (e.g., `.dorgy/index/manifest.json`) and document repository lifecycle (create, compact, rebuild).
+
+2. **Search CLI Enhancements**
+   - Update `dorgy search` to hit the vector index for semantic queries while supporting hybrid filters (tags, categories, time, needs-review).
+   - Add `--reindex` and `--refresh` maintenance commands to rebuild or sync the index when files change outside Dorgy.
+   - Emit enriched JSON payloads (scores, matched metadata) and expand tests covering semantic vs. lexical searches.
+
+3. **Metadata Synchronization**
+   - Wire watch service and `dorgy mv` to update/remap index entries on renames, moves, deletions; ensure suppressed operations log reconciliation notes.
+   - Backfill existing collections by reading `.dorgy/state.json` and replaying history; expose `dorgy search sync` helper for automation.
+   - Guard against stale entries by tracking hash/version fields and pruning missing files during maintenance.
+
+4. **Developer Experience & Observability**
+   - Provide debug logging/timing for indexing stages similar to ingestion/classification progress.
+   - Document environment requirements (Chroma models, embeddings) and surface configuration defaults in README/SPEC/AGENTS.
+   - Add regression tests asserting index consistency after organization runs, watch batches, and manual moves.
+
+### Risks & Mitigations
+- **Large collections**: Use batched upserts and configurable limits to avoid memory spikes; document tuning options.
+- **Search quality drift**: Allow swapping embedding providers via config and add sanity tests using fixtures.
+- **Index corruption**: Implement manifest checksums and provide rebuild commands with clear CLI prompts.
+
+### Success Criteria
+- `dorgy search` returns semantic results (with scores) alongside existing filter support and passes new integration tests.
+- Watch and organization flows update the ChromaDB index without manual intervention; index manifests remain in sync with `.dorgy/state.json`.
+- Documentation (README, SPEC Phase 7, AGENTS) covers index configuration, maintenance commands, and automation expectations.

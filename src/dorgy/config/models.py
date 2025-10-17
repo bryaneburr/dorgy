@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class DorgyBaseModel(BaseModel):
@@ -47,6 +47,8 @@ class ProcessingOptions(DorgyBaseModel):
         locked_files: Policy describing how to handle locked files.
         corrupted_files: Policy describing how to handle corrupted files.
         watch: Watch configuration controlling debounce and backoff.
+        parallel_workers: Maximum number of concurrent worker threads used for ingestion
+            and classification tasks.
     """
 
     use_vision_models: bool = False
@@ -59,6 +61,10 @@ class ProcessingOptions(DorgyBaseModel):
     locked_files: "LockedFilePolicy" = Field(default_factory=lambda: LockedFilePolicy())
     corrupted_files: "CorruptedFilePolicy" = Field(default_factory=lambda: CorruptedFilePolicy())
     watch: "WatchSettings" = Field(default_factory=lambda: WatchSettings())
+    parallel_workers: int = Field(
+        default=1,
+        validation_alias=AliasChoices("parallel_workers", "classification_workers"),
+    )
 
 
 class LockedFilePolicy(DorgyBaseModel):
@@ -163,11 +169,17 @@ class CLIOptions(DorgyBaseModel):
         quiet_default: Whether commands suppress non-error output by default.
         summary_default: Whether commands only print summary lines by default.
         status_history_limit: Default number of status history entries to display.
+        progress_enabled: Whether progress indicators are rendered by default.
+        search_default_limit: Default result limit for ``dorgy search``.
+        move_conflict_strategy: Default conflict resolution strategy for ``dorgy mv``.
     """
 
     quiet_default: bool = False
     summary_default: bool = False
     status_history_limit: int = 5
+    progress_enabled: bool = True
+    search_default_limit: int = 20
+    move_conflict_strategy: Literal["append_number", "timestamp", "skip"] = "append_number"
 
 
 class DorgyConfig(DorgyBaseModel):

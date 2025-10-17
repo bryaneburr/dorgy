@@ -74,3 +74,11 @@
 - Introduced `processing.watch.allow_deletions` (default `false`) and `dorgy watch --allow-deletions`; CLI summaries now surface `deleted` counts and warn on executed or suppressed removals.
 - Expanded watch tests to cover suppressed deletions, opt-in deletions, internal moves, and moves outside the collection, then refreshed README/SPEC/AGENTS guidance.
 - Next actions: roll the enhanced watch metadata into upcoming Phase 6 CLI workflows (`search`, `mv`, extended status) and align automation documentation as new commands come online.
+
+## 2025-10-23
+- Implemented Phase 6 CLI surface additions: added `dorgy search` with tag/name/date filters plus JSON/count parity and introduced `dorgy mv` leveraging the operation executor for safe moves/renames, including conflict strategies and dry-run support.
+- Centralized CLI option factories in `dorgy.cli.options`, added `_ProgressScope` for Rich progress instrumentation (wired into `org` and `watch --once`), and extended CLI configuration with `cli.progress_enabled`, `cli.search_default_limit`, and `cli.move_conflict_strategy`.
+- Updated watch batch JSON to record `started_at`, `completed_at`, and `duration_seconds`; refreshed README, SPEC, and AGENTS documentation to describe new commands and configuration defaults.
+- Added integration tests covering `dorgy search` filters/limits and `dorgy mv` execution, dry-run, and skip-conflict behaviour; introduced JSON assertions to guard new payload schemas.
+- Instrumented classification calls with per-request timing, added configurable concurrency (`processing.parallel_workers`), and wired run-time progress so slow LLM responses can be diagnosed while multiple requests run in parallel.
+- Next actions: continue Phase 6 polish (e.g., additional search filters, CLI UX refinements), validate progress output across terminals, and stage remaining Phase 6 scope before marking the phase complete.

@@ -3,20 +3,35 @@
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import json
+import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import click
 import yaml
 from click.core import ParameterSource
 from rich.console import Console
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.syntax import Syntax
 from rich.table import Table
 
 from dorgy.classification import ClassificationCache
+from dorgy.classification.structure import StructurePlanner
+from dorgy.cli_options import (
+    ModeResolution,
+    dry_run_option,
+    json_option,
+    output_option,
+    prompt_option,
+    quiet_option,
+    recursive_option,
+    resolve_mode_settings,
+    summary_option,
+)
 from dorgy.cli_support import (
     build_original_snapshot,
     collect_error_payload,
@@ -27,14 +42,16 @@ from dorgy.cli_support import (
     zip_decisions,
 )
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
-from dorgy.ingestion import IngestionPipeline
+from dorgy.ingestion import FileDescriptor, IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
 from dorgy.ingestion.discovery import DirectoryScanner
 from dorgy.ingestion.extractors import MetadataExtractor
 from dorgy.organization.executor import OperationExecutor
+from dorgy.organization.models import MoveOperation, OperationPlan
 from dorgy.organization.planner import OrganizerPlanner
 from dorgy.state import (
     CollectionState,
+    FileRecord,
     MissingStateError,
     OperationEvent,
     StateError,
@@ -43,6 +60,126 @@ from dorgy.state import (
 from dorgy.watch import WatchBatchResult, WatchService
 
 console = Console()
+LOGGER = logging.getLogger(__name__)
+
+
+class _ProgressTask:
+    """Manage lifecycle updates for an individual progress task."""
+
+    def __init__(
+        self,
+        progress: Progress | None,
+        task_id: int | None,
+        *,
+        enabled: bool,
+        has_total: bool,
+    ) -> None:
+        """Initialize a progress task wrapper.
+
+        Args:
+            progress: Rich progress instance managing the task.
+            task_id: Identifier assigned by the progress manager.
+            enabled: Indicates whether progress output is active.
+        """
+        self._progress = progress
+        self._task_id = task_id
+        self._enabled = enabled
+        self._has_total = has_total
+
+    def update(self, description: str) -> None:
+        """Update the task description while the operation is running."""
+
+        if not self._enabled or self._progress is None or self._task_id is None:
+            return
+        self._progress.update(self._task_id, description=description)
+
+    def complete(self, message: str | None = None) -> None:
+        """Mark the task as finished and optionally update the description."""
+
+        if not self._enabled or self._progress is None or self._task_id is None:
+            return
+        if message:
+            self._progress.update(self._task_id, description=message)
+        self._progress.stop_task(self._task_id)
+        self._progress.remove_task(self._task_id)
+        self._task_id = None
+
+    def advance(self, *, step: int = 1, description: str | None = None) -> None:
+        """Advance the task progress and optionally update the description."""
+
+        if not self._enabled or self._progress is None or self._task_id is None:
+            return
+        kwargs: dict[str, Any] = {}
+        if description is not None:
+            kwargs["description"] = description
+        if self._has_total:
+            kwargs["advance"] = step
+        self._progress.update(self._task_id, **kwargs)
+
+    def set_description(self, description: str) -> None:
+        """Update the task description without advancing progress."""
+
+        if not self._enabled or self._progress is None or self._task_id is None:
+            return
+        self._progress.update(self._task_id, description=description)
+
+
+class _ProgressScope:
+    """Context manager that coordinates Rich progress rendering."""
+
+    def __init__(self, enabled: bool) -> None:
+        """Initialize the scope.
+
+        Args:
+            enabled: Indicates whether progress output should be rendered.
+        """
+        self._enabled = enabled
+        self._progress: Progress | None = None
+
+    def __enter__(self) -> "_ProgressScope":
+        if self._enabled:
+            self._progress = Progress(
+                SpinnerColumn(style="cyan"),
+                TextColumn("{task.description}"),
+                BarColumn(bar_width=None),
+                TimeElapsedColumn(),
+                transient=True,
+                console=console,
+            )
+            self._progress.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._progress is not None:
+            self._progress.__exit__(exc_type, exc, tb)
+        self._progress = None
+
+    def start(self, description: str, *, total: int | None = None) -> _ProgressTask:
+        """Begin a new indeterminate progress task."""
+
+        if not self._enabled or self._progress is None:
+            return _ProgressTask(None, None, enabled=False, has_total=False)
+        task_id = self._progress.add_task(description, total=total)
+        return _ProgressTask(
+            self._progress,
+            task_id,
+            enabled=True,
+            has_total=total is not None,
+        )
+
+
+INGESTION_STAGE_LABELS: dict[str, str] = {
+    "scan": "Scanning",
+    "locked": "Resolving lock",
+    "detect": "Detecting type",
+    "hash": "Computing hash",
+    "metadata": "Extracting metadata",
+    "preview": "Generating preview",
+    "complete": "Completed",
+    "skipped": "Skipped",
+    "error": "Error",
+    "quarantine": "Quarantined",
+}
 
 
 def _handle_cli_error(
@@ -301,29 +438,290 @@ def _format_history_event(event: OperationEvent) -> str:
     )
 
 
+def _format_size(size_bytes: int | None) -> str:
+    """Return a human-readable representation of a byte count."""
+
+    if size_bytes is None or size_bytes < 0:
+        return "?"
+    units = ["B", "KB", "MB", "GB", "TB", "PB"]
+    value = float(size_bytes)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PB"
+
+
+def _descriptor_size(descriptor: FileDescriptor) -> int | None:
+    """Return the descriptor's size in bytes when present."""
+
+    raw = descriptor.metadata.get("size_bytes") if descriptor.metadata else None
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _render_tree(paths: Iterable[Path], root: Path) -> str:
+    """Render a tree representation of proposed file destinations."""
+
+    tree: dict[str, dict] = {}
+
+    for path in sorted(paths):
+        candidate = Path(path)
+        try:
+            relative = candidate.relative_to(root)
+        except ValueError:
+            continue
+        if not relative.parts:
+            continue
+        node = tree
+        for part in relative.parts:
+            node = node.setdefault(part, {})
+
+    lines: list[str] = []
+
+    def walk(node: dict[str, dict], prefix: str = "") -> None:
+        items = sorted(node.items())
+        for index, (name, child) in enumerate(items):
+            is_last = index == len(items) - 1
+            connector = "└──" if is_last else "├──"
+            lines.append(f"{prefix}{connector} {name}")
+            if child:
+                extension = "    " if is_last else "│   "
+                walk(child, prefix + extension)
+
+    walk(tree)
+    return "\n".join(lines)
+
+
+def _normalise_state_key(value: str) -> str:
+    """Return a normalized representation for state paths using forward slashes.
+
+    Args:
+        value: Path string to normalize.
+
+    Returns:
+        str: Normalized path string with forward slashes.
+    """
+
+    return value.replace("\\", "/")
+
+
+def _parse_csv_option(raw: str | None) -> list[str]:
+    """Parse a comma-separated CLI option into a list of values.
+
+    Args:
+        raw: Raw comma-separated string supplied by the user.
+
+    Returns:
+        list[str]: List of trimmed values (empty when no input provided).
+    """
+
+    if not raw:
+        return []
+    return [segment.strip() for segment in raw.split(",") if segment.strip()]
+
+
+def _parse_datetime_option(option_name: str, raw: str | None) -> datetime | None:
+    """Parse an ISO 8601 datetime option into a timezone-aware value.
+
+    Args:
+        option_name: CLI flag name used for error reporting.
+        raw: Raw string value supplied by the user.
+
+    Returns:
+        datetime | None: Parsed datetime in UTC or ``None`` when not provided.
+
+    Raises:
+        click.ClickException: If the value cannot be parsed.
+    """
+
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        message = (
+            f"Invalid value for {option_name}: {raw}. Use ISO 8601 format "
+            "(YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)."
+        )
+        raise click.ClickException(message) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _detect_collection_root(path: Path) -> Path:
+    """Return the collection root that owns the given path.
+
+    Args:
+        path: Absolute file or directory path located within a collection.
+
+    Returns:
+        Path: Collection root containing `.dorgy/state.json`.
+
+    Raises:
+        MissingStateError: If the path does not belong to a managed collection.
+    """
+
+    candidate = path if path.is_dir() else path.parent
+    for current in [candidate, *candidate.parents]:
+        state_path = current / ".dorgy" / "state.json"
+        if state_path.exists():
+            return current
+    raise MissingStateError(f"No collection state found for {path}.")
+
+
+def _resolve_move_destination(
+    source: Path,
+    candidate: Path,
+    strategy: str,
+) -> tuple[Path | None, bool, str | None, bool]:
+    """Resolve naming conflicts for a move/rename destination.
+
+    Args:
+        source: Source path that will be moved.
+        candidate: Desired destination path.
+        strategy: Conflict resolution strategy (`append_number`, `timestamp`, `skip`).
+
+    Returns:
+        Tuple containing the resolved destination (or ``None`` when skipped), a flag
+        indicating whether a conflict occurred, an optional explanatory note, and a
+        boolean indicating whether the operation should be skipped entirely.
+    """
+
+    normalized = (strategy or "append_number").lower()
+    if normalized not in {"append_number", "timestamp", "skip"}:
+        normalized = "append_number"
+
+    if candidate.resolve() == source.resolve():
+        return candidate, False, None, False
+
+    conflict_applied = False
+    base_candidate = candidate
+    final_candidate = candidate
+    counter = 1
+    timestamp_applied = False
+
+    while final_candidate.exists():
+        conflict_applied = True
+        if normalized == "skip":
+            note = (
+                f"Skipped move for {source} because {final_candidate} already exists "
+                "and the conflict strategy is 'skip'."
+            )
+            return None, True, note, True
+        if normalized == "timestamp" and not timestamp_applied:
+            timestamp_applied = True
+            timestamp_value = datetime.now(timezone.utc)
+            suffix = timestamp_value.strftime("%Y%m%d-%H%M%S")
+            base_candidate = candidate.with_name(f"{candidate.stem}-{suffix}{candidate.suffix}")
+            final_candidate = base_candidate
+            continue
+        final_candidate = base_candidate.with_name(
+            f"{base_candidate.stem}-{counter}{base_candidate.suffix}"
+        )
+        counter += 1
+
+    note_text: str | None = None
+    if conflict_applied:
+        note_text = f"Resolved conflict for {source} -> {final_candidate} using '{normalized}'."
+    return final_candidate, conflict_applied, note_text, False
+
+
+def _plan_state_changes(
+    state: CollectionState,
+    root: Path,
+    source: Path,
+    destination: Path,
+) -> list[tuple[str, str]]:
+    """Compute state path updates required for a move/rename operation.
+
+    Args:
+        state: Loaded collection state.
+        root: Collection root path.
+        source: Original filesystem path.
+        destination: Destination filesystem path after the move.
+
+    Returns:
+        list[tuple[str, str]]: Sequence of (old_path, new_path) mappings.
+
+    Raises:
+        click.ClickException: If the source is not tracked in the collection.
+    """
+
+    source_rel = _normalise_state_key(relative_to_collection(source, root))
+    dest_rel = _normalise_state_key(relative_to_collection(destination, root))
+    mappings: list[tuple[str, str]] = []
+
+    if source.is_dir():
+        prefix = source_rel.rstrip("/")
+        for key in list(state.files.keys()):
+            normalised_key = _normalise_state_key(key)
+            if normalised_key == prefix or normalised_key.startswith(f"{prefix}/"):
+                suffix = normalised_key[len(prefix) :].lstrip("/")
+                new_key = dest_rel if not suffix else f"{dest_rel}/{suffix}"
+                mappings.append((key, new_key))
+        if not mappings:
+            raise click.ClickException(
+                f"No tracked files found under {source_rel}. Run `dorgy org` to refresh state."
+            )
+        return mappings
+
+    matched_key: str | None = None
+    for key in state.files.keys():
+        if _normalise_state_key(key) == source_rel:
+            matched_key = key
+            break
+    if matched_key is None:
+        raise click.ClickException(
+            f"{source_rel} is not tracked in the collection state. "
+            "Run `dorgy org` to refresh metadata before moving files."
+        )
+
+    mappings.append((matched_key, dest_rel))
+    return mappings
+
+
+def _apply_state_changes(state: CollectionState, changes: Iterable[tuple[str, str]]) -> None:
+    """Apply planned state path updates to the in-memory state model.
+
+    Args:
+        state: State model to mutate.
+        changes: Iterable of (old_path, new_path) tuples describing updates.
+    """
+
+    staged: list[tuple[str, FileRecord]] = []
+    for old_key, new_key in changes:
+        record = state.files.pop(old_key, None)
+        if record is None:
+            continue
+        staged.append((new_key, record))
+    for new_key, record in staged:
+        record.path = new_key
+        state.files[new_key] = record
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="dorgy")
 def cli() -> None:
-    """Dorgy automatically organizes your files using AI-assisted workflows.
-
-    Returns:
-        None: This function is invoked for its side effects.
-    """
+    """Dorgy automatically organizes your files using AI-assisted workflows."""
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("-r", "--recursive", is_flag=True, help="Include all subdirectories.")
-@click.option("--prompt", type=str, help="Provide extra instructions for organization.")
-@click.option(
-    "--output",
-    type=click.Path(file_okay=False, path_type=str),
-    help="Directory for organized files.",
-)
-@click.option("--dry-run", is_flag=True, help="Preview changes without modifying files.")
-@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing proposed changes.")
-@click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
-@click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@recursive_option("Include all subdirectories.")
+@prompt_option("Provide extra instructions for organization.")
+@output_option("Directory for organized files.")
+@dry_run_option("Preview changes without modifying files.")
+@json_option("Emit JSON describing proposed changes.")
+@summary_option()
+@quiet_option()
 @click.pass_context
 def org(
     ctx: click.Context,
@@ -336,22 +734,7 @@ def org(
     summary_mode: bool,
     quiet: bool,
 ) -> None:
-    """Organize files rooted at PATH using the configured ingestion pipeline.
-
-    Args:
-        ctx: Click context used for parameter source inspection.
-        path: Root directory to organize.
-        recursive: Whether to include subdirectories during scanning.
-        prompt: Additional natural-language guidance for the workflow.
-        output: Destination directory for organized files.
-        dry_run: If True, skip making filesystem mutations.
-        json_output: If True, emit JSON describing planned or applied changes.
-        summary_mode: When True, limit output to summary lines and warnings.
-        quiet: When True, suppress non-error CLI output entirely.
-
-    Raises:
-        click.ClickException: If configuration loading or validation fails.
-    """
+    """Organize files rooted at PATH using the configured ingestion pipeline."""
 
     json_enabled = json_output
     try:
@@ -359,24 +742,23 @@ def org(
         manager.ensure_exists()
         config = manager.load()
 
-        explicit_quiet = ctx.get_parameter_source("quiet") == ParameterSource.COMMANDLINE
-        explicit_summary = ctx.get_parameter_source("summary_mode") == ParameterSource.COMMANDLINE
-
-        quiet_enabled = quiet if explicit_quiet else config.cli.quiet_default
-        summary_only = summary_mode if explicit_summary else config.cli.summary_default
-
-        if json_output:
-            if explicit_quiet and quiet_enabled:
-                raise click.ClickException("--json cannot be combined with --quiet.")
-            if explicit_summary and summary_only:
-                raise click.ClickException("--json cannot be combined with --summary.")
-            quiet_enabled = False
-            summary_only = False
-
-        if quiet_enabled and summary_only:
-            raise click.ClickException(
-                "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
-            )
+        mode: ModeResolution = resolve_mode_settings(
+            ctx,
+            config.cli,
+            quiet_flag=quiet,
+            summary_flag=summary_mode,
+            json_flag=json_output,
+        )
+        quiet_enabled = mode.quiet
+        summary_only = mode.summary
+        json_enabled = mode.json_output
+        progress_enabled = (
+            config.cli.progress_enabled
+            and console.is_terminal
+            and not json_enabled
+            and not quiet_enabled
+            and not summary_only
+        )
 
         source_root = Path(path).expanduser().resolve()
         target_root = source_root
@@ -414,38 +796,191 @@ def org(
             allow_writes=not dry_run,
         )
 
-        result = pipeline.run([source_root])
-        classification_batch = run_classification(
-            result.processed,
-            prompt,
-            source_root,
-            dry_run,
-            config,
-            classification_cache,
-        )
-
-        paired = list(zip_decisions(classification_batch, result.processed))
-        confidence_threshold = config.ambiguity.confidence_threshold
-        for decision, descriptor in paired:
-            if decision is not None and decision.confidence < confidence_threshold:
-                decision.needs_review = True
-                if descriptor.path not in result.needs_review:
-                    result.needs_review.append(descriptor.path)
-
         planner = OrganizerPlanner()
-        plan = planner.build_plan(
-            descriptors=[descriptor for _, descriptor in paired],
-            decisions=[decision for decision, _ in paired],
-            rename_enabled=config.organization.rename_files,
-            root=target_root,
-            conflict_strategy=config.organization.conflict_resolution,
-        )
+        parallel_workers = max(1, config.processing.parallel_workers)
+
+        with _ProgressScope(progress_enabled) as progress:
+            ingestion_task = progress.start("Preparing files")
+            ingestion_state = {"completed": 0}
+            ingestion_worker_tasks: dict[int, _ProgressTask] = {}
+
+            def _ingestion_stage(
+                stage: str,
+                stage_path: Path,
+                info: dict[str, Any] | None,
+            ) -> None:
+                label = INGESTION_STAGE_LABELS.get(stage, stage.replace("_", " ").title())
+                completed = ingestion_state["completed"]
+                path_name = stage_path.name
+                size_value = None
+                if info is not None and "size_bytes" in info:
+                    try:
+                        size_value = int(info["size_bytes"])
+                    except (TypeError, ValueError):
+                        size_value = None
+                size_suffix = f" ({_format_size(size_value)})" if size_value is not None else ""
+                worker_id: int | None = None
+                if info is not None and "worker_id" in info:
+                    try:
+                        worker_id = int(info["worker_id"])
+                    except (TypeError, ValueError):
+                        worker_id = None
+
+                def _ensure_worker_task(identifier: int) -> _ProgressTask:
+                    task = ingestion_worker_tasks.get(identifier)
+                    if task is None:
+                        task = progress.start("", total=None)
+                        ingestion_worker_tasks[identifier] = task
+                    return task
+
+                if worker_id is not None and progress_enabled:
+                    task = _ensure_worker_task(worker_id)
+                    if stage in {"complete", "error", "skipped", "quarantine"}:
+                        task.complete("")
+                        ingestion_worker_tasks.pop(worker_id, None)
+                    else:
+                        task.set_description(f"{path_name}{size_suffix} – {label.lower()}")
+                    return
+
+                if stage == "complete":
+                    ingestion_state["completed"] += 1
+                    updated = ingestion_state["completed"]
+                    ingestion_task.set_description(
+                        f"Completed ({updated}) {path_name}{size_suffix}"
+                    )
+                elif stage == "error":
+                    ingestion_task.set_description(f"Error: {path_name}{size_suffix}")
+                elif stage == "skipped":
+                    ingestion_task.set_description(
+                        f"Skipped {path_name}{size_suffix} ({completed} done)"
+                    )
+                elif stage == "quarantine":
+                    ingestion_task.set_description(
+                        f"Quarantined {path_name}{size_suffix} ({completed} done)"
+                    )
+                else:
+                    ingestion_task.set_description(
+                        f"{label}: {path_name}{size_suffix} ({completed} done)"
+                    )
+
+            result = pipeline.run(
+                [source_root],
+                on_stage=_ingestion_stage if progress_enabled else None,
+            )
+            files_total = len(result.processed)
+            ingestion_task.complete(f"Ingestion complete ({files_total} file(s))")
+
+            overall_task: _ProgressTask | None = None
+            worker_tasks: dict[int, _ProgressTask] = {}
+
+            if files_total > 0:
+                overall_task = progress.start(
+                    "Classifying files",
+                    total=files_total,
+                )
+
+            def _classification_progress(
+                event: str,
+                processed: int,
+                total: int,
+                descriptor: FileDescriptor,
+                worker_id: int | None,
+                duration: float | None,
+            ) -> None:
+                if overall_task is None:
+                    return
+
+                name = descriptor.path.name
+                size_text = _format_size(_descriptor_size(descriptor))
+                display = f"{name} ({size_text})" if size_text != "?" else name
+
+                if event == "start":
+                    if worker_id is None:
+                        overall_task.set_description(
+                            f"Classifying cached ({processed}/{total}) {display}"
+                        )
+                        return
+                    task = worker_tasks.get(worker_id)
+                    if task is None:
+                        task = progress.start("", total=None)
+                        worker_tasks[worker_id] = task
+                    task.set_description(display)
+                    return
+
+                if event == "complete":
+                    overall_task.advance(description=f"Classified {processed}/{total}")
+                    if worker_id is not None:
+                        task = worker_tasks.get(worker_id)
+                        if task is not None:
+                            task.complete("")
+                            worker_tasks.pop(worker_id, None)
+                    return
+
+            classification_batch = run_classification(
+                result.processed,
+                prompt,
+                source_root,
+                dry_run,
+                config,
+                classification_cache,
+                on_progress=(
+                    _classification_progress if progress_enabled and files_total else None
+                ),
+                max_workers=parallel_workers,
+            )
+            if overall_task is not None:
+                overall_task.complete("Classification complete")
+
+            paired = list(zip_decisions(classification_batch, result.processed))
+            descriptor_list = [descriptor for _, descriptor in paired]
+            decision_list = [decision for decision, _ in paired]
+            confidence_threshold = config.ambiguity.confidence_threshold
+            for decision, descriptor in paired:
+                if decision is not None and decision.confidence < confidence_threshold:
+                    decision.needs_review = True
+                    if descriptor.path not in result.needs_review:
+                        result.needs_review.append(descriptor.path)
+
+            structure_map: dict[Path, Path] = {}
+            structure_task: _ProgressTask | None = None
+            if descriptor_list and progress_enabled:
+                structure_task = progress.start(
+                    f"Planning structure ({len(descriptor_list)} files)",
+                    total=None,
+                )
+            if descriptor_list:
+                try:
+                    structure_planner = StructurePlanner(config.llm)
+                    structure_map = structure_planner.propose(
+                        descriptor_list,
+                        decision_list,
+                        source_root=source_root,
+                    )
+                    if structure_task is not None:
+                        structure_task.complete("Structure plan ready")
+                except Exception as exc:  # pragma: no cover - best-effort hint
+                    if structure_task is not None:
+                        structure_task.complete("Structure plan skipped")
+                    LOGGER.debug("Structure planner unavailable: %s", exc)
+            elif structure_task is not None:
+                structure_task.complete("Structure plan skipped")
+
+            plan_task = progress.start("Building operation plan")
+            plan = planner.build_plan(
+                descriptors=descriptor_list,
+                decisions=decision_list,
+                rename_enabled=config.organization.rename_files,
+                root=target_root,
+                conflict_strategy=config.organization.conflict_resolution,
+                destination_map=structure_map,
+            )
+            plan_task.complete("Operation plan ready")
         rename_map = {operation.source: operation.destination for operation in plan.renames}
         move_map = {operation.source: operation.destination for operation in plan.moves}
 
         final_path_map: dict[Path, Path] = {}
         file_entries: list[dict[str, Any]] = []
-        table_rows: list[tuple[str, str, str, str, str]] = []
+        table_rows: list[tuple[str, str, str, str, str, str]] = []
 
         for decision, descriptor in paired:
             original_path = descriptor.path
@@ -477,13 +1012,20 @@ def org(
             except ValueError:
                 pass
             category = decision.primary_category if decision else "-"
+            confidence_value = "-"
+            status_label = "-"
+            if decision is not None:
+                if decision.confidence is not None:
+                    confidence_value = f"{decision.confidence:.2f}"
+                status_label = "Review" if decision.needs_review else "Ok"
             table_rows.append(
                 (
                     str(relative_path),
                     descriptor.mime_type,
                     str(metadata.get("size_bytes", "?")),
                     category,
-                    (descriptor.preview or "")[:120],
+                    confidence_value,
+                    status_label,
                 )
             )
 
@@ -517,11 +1059,30 @@ def org(
             table.add_column("File", overflow="fold")
             table.add_column("Type")
             table.add_column("Size", justify="right")
+            threshold = config.ambiguity.confidence_threshold
             table.add_column("Category")
-            table.add_column("Preview", overflow="fold")
+            table.add_column(f"Confidence ≥ {threshold:.2f}", justify="right")
+            table.add_column("Status", justify="center")
             for row in table_rows:
                 table.add_row(*row)
             _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)
+
+            tree_output = _render_tree(final_path_map.values(), target_root)
+            if tree_output:
+                tree_mode = "summary" if summary_only else "detail"
+                _emit_message(
+                    f"[cyan]Proposed file tree for {target_root}:[/cyan]",
+                    mode=tree_mode,
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+                for line in tree_output.splitlines():
+                    _emit_message(
+                        f"  {line}",
+                        mode=tree_mode,
+                        quiet=quiet_enabled,
+                        summary_only=summary_only,
+                    )
 
             classification_total = sum(
                 1 for decision in classification_batch.decisions if decision is not None
@@ -663,7 +1224,10 @@ def org(
         try:
             if snapshot is not None:
                 repository.write_original_structure(target_root, snapshot)
-            events = executor.apply(plan, target_root)
+            with _ProgressScope(progress_enabled) as progress:
+                apply_task = progress.start("Applying operation plan")
+                events = executor.apply(plan, target_root)
+                apply_task.complete("Operation plan applied")
         except Exception as exc:
             raise click.ClickException(
                 f"Failed to apply organization plan: {exc}. "
@@ -782,18 +1346,14 @@ def org(
 
 @cli.command()
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("-r", "--recursive", is_flag=True, help="Include subdirectories for monitoring.")
-@click.option("--prompt", type=str, help="Provide extra classification guidance.")
-@click.option(
-    "--output",
-    type=click.Path(file_okay=False, path_type=str),
-    help="Destination root when copying organized files.",
-)
-@click.option("--dry-run", is_flag=True, help="Preview actions without mutating files.")
+@recursive_option("Include subdirectories for monitoring.")
+@prompt_option("Provide extra classification guidance.")
+@output_option("Destination root when copying organized files.")
+@dry_run_option("Preview actions without mutating files.")
 @click.option("--debounce", type=float, help="Override debounce interval in seconds.")
-@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing watch batches.")
-@click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
-@click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@json_option("Emit JSON describing watch batches.")
+@summary_option()
+@quiet_option()
 @click.option(
     "--allow-deletions",
     is_flag=True,
@@ -815,26 +1375,7 @@ def watch(
     allow_deletions: bool,
     once: bool,
 ) -> None:
-    """Continuously monitor PATHS and organize changes as they arrive.
-
-    Args:
-        ctx: Click context for parameter source inspection.
-        paths: One or more directory roots to monitor.
-        recursive: Whether to include subdirectories while watching.
-        prompt: Optional natural-language guidance for classification.
-        output: Optional destination for copy-mode organization.
-        dry_run: When True, skip filesystem mutations.
-        debounce: Optional debounce override in seconds.
-        json_output: When True, emit JSON payloads instead of text.
-        summary_mode: When True, restrict output to summary/warning lines.
-        quiet: When True, suppress non-error output entirely.
-        allow_deletions: When True, permit removal of state entries when files are deleted
-            or leave the watched roots.
-        once: When True, process current contents once and exit.
-
-    Raises:
-        click.ClickException: If option combinations are invalid.
-    """
+    """Continuously monitor PATHS and organize changes as they arrive."""
 
     if not paths:
         raise click.ClickException("Provide at least one PATH to monitor.")
@@ -847,22 +1388,23 @@ def watch(
         _handle_cli_error(str(exc), code="config_error", json_output=json_output)
         return
 
-    explicit_quiet = ctx.get_parameter_source("quiet") == ParameterSource.COMMANDLINE
-    explicit_summary = ctx.get_parameter_source("summary_mode") == ParameterSource.COMMANDLINE
-
-    quiet_enabled = quiet if explicit_quiet else config.cli.quiet_default
-    summary_only = summary_mode if explicit_summary else config.cli.summary_default
-
-    if json_output:
-        if quiet_enabled and explicit_quiet:
-            raise click.ClickException("--json cannot be combined with --quiet.")
-        if summary_only and explicit_summary:
-            raise click.ClickException("--json cannot be combined with --summary.")
-
-    if quiet_enabled and summary_only:
-        raise click.ClickException(
-            "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
-        )
+    mode: ModeResolution = resolve_mode_settings(
+        ctx,
+        config.cli,
+        quiet_flag=quiet,
+        summary_flag=summary_mode,
+        json_flag=json_output,
+    )
+    quiet_enabled = mode.quiet
+    summary_only = mode.summary
+    json_output = mode.json_output
+    progress_enabled = (
+        config.cli.progress_enabled
+        and console.is_terminal
+        and not json_output
+        and not quiet_enabled
+        and not summary_only
+    )
 
     allow_source = ctx.get_parameter_source("allow_deletions")
     if allow_source == ParameterSource.COMMANDLINE:
@@ -895,7 +1437,10 @@ def watch(
         raise click.ClickException(str(exc)) from exc
 
     if once:
-        batches = service.process_once()
+        with _ProgressScope(progress_enabled) as progress:
+            task = progress.start("Processing watch batch")
+            batches = service.process_once()
+            task.complete("Watch run complete")
         if json_output:
             console.print_json(data={"batches": [batch.json_payload for batch in batches]})
             return
@@ -951,24 +1496,13 @@ def watch(
 
 @cli.group()
 def config() -> None:
-    """Manage Dorgy configuration files and overrides.
-
-    Returns:
-        None: This function is invoked for its side effects.
-    """
+    """Manage Dorgy configuration files and overrides."""
 
 
 @config.command("view")
 @click.option("--no-env", is_flag=True, help="Ignore environment overrides when displaying output.")
 def config_view(no_env: bool) -> None:
-    """Display the effective configuration after applying precedence rules.
-
-    Args:
-        no_env: If True, ignore environment-derived overrides.
-
-    Raises:
-        click.ClickException: If configuration cannot be loaded.
-    """
+    """Display the effective configuration after applying precedence rules."""
     manager = ConfigManager()
     try:
         manager.ensure_exists()
@@ -984,15 +1518,7 @@ def config_view(no_env: bool) -> None:
 @click.argument("key")
 @click.option("--value", required=True, help="Value to assign to KEY.")
 def config_set(key: str, value: str) -> None:
-    """Persist a configuration value expressed as a dotted KEY.
-
-    Args:
-        key: Dotted path describing the configuration field to update.
-        value: YAML-literal value to write into the configuration file.
-
-    Raises:
-        click.ClickException: If parsing, assignment, or validation fails.
-    """
+    """Persist a configuration value expressed as a dotted KEY."""
     manager = ConfigManager()
     manager.ensure_exists()
 
@@ -1042,11 +1568,7 @@ def config_set(key: str, value: str) -> None:
 
 @config.command("edit")
 def config_edit() -> None:
-    """Open the configuration file in an interactive editor session.
-
-    Raises:
-        click.ClickException: If edited content is invalid or cannot be saved.
-    """
+    """Open the configuration file in an interactive editor session."""
     manager = ConfigManager()
     manager.ensure_exists()
 
@@ -1080,39 +1602,559 @@ def config_edit() -> None:
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("--search", "query", type=str, help="Free-text search query.")
-@click.option("--tags", type=str, help="Comma-separated tag filters.")
-@click.option("--before", type=str, help="Return results created before this date.")
-def search(**_: object) -> None:
-    """Search within an organized collection.
+@click.option(
+    "--search",
+    "query",
+    type=str,
+    help="Free-text search across paths, tags, and categories.",
+)
+@click.option("--name", type=str, help="Filename glob filter (e.g., '*.pdf').")
+@click.option(
+    "--tags",
+    type=str,
+    help="Comma-separated tag filters (matches all provided tags).",
+)
+@click.option(
+    "--categories",
+    type=str,
+    help="Comma-separated category filters (matches all provided categories).",
+)
+@click.option(
+    "--before",
+    type=str,
+    help="Return results with modified time before this ISO 8601 timestamp.",
+)
+@click.option(
+    "--after",
+    type=str,
+    help="Return results with modified time on or after this ISO 8601 timestamp.",
+)
+@click.option(
+    "--needs-review/--any-review",
+    "needs_review",
+    default=None,
+    help="Filter results by needs-review flag (default is to include all).",
+)
+@click.option(
+    "--limit",
+    type=int,
+    default=None,
+    show_default=False,
+    help="Maximum number of results to return (defaults to configuration).",
+)
+@json_option("Emit search results as JSON.")
+@summary_option()
+@quiet_option()
+@click.pass_context
+def search(
+    ctx: click.Context,
+    path: str,
+    query: str | None,
+    name: str | None,
+    tags: str | None,
+    categories: str | None,
+    before: str | None,
+    after: str | None,
+    needs_review: bool | None,
+    limit: int | None,
+    json_output: bool,
+    summary_mode: bool,
+    quiet: bool,
+) -> None:
+    """Search within an organized collection's state metadata."""
 
-    Args:
-        _: Placeholder for Click-injected keyword arguments.
+    json_enabled = json_output
+    try:
+        manager = ConfigManager()
+        manager.ensure_exists()
+        config = manager.load()
 
-    Returns:
-        None: This function is invoked for its side effects.
-    """
-    _not_implemented("dorgy search")
+        mode: ModeResolution = resolve_mode_settings(
+            ctx,
+            config.cli,
+            quiet_flag=quiet,
+            summary_flag=summary_mode,
+            json_flag=json_output,
+        )
+        quiet_enabled = mode.quiet
+        summary_only = mode.summary
+        json_enabled = mode.json_output
+
+        effective_limit = limit if limit is not None else config.cli.search_default_limit
+        if effective_limit is not None and effective_limit <= 0:
+            raise click.ClickException("--limit must be greater than zero.")
+
+        before_dt = _parse_datetime_option("--before", before)
+        after_dt = _parse_datetime_option("--after", after)
+        if before_dt and after_dt and after_dt > before_dt:
+            raise click.ClickException("--after must be earlier than or equal to --before.")
+
+        tag_terms = _parse_csv_option(tags)
+        category_terms = _parse_csv_option(categories)
+        tag_filters = {value.lower() for value in tag_terms}
+        category_filters = {value.lower() for value in category_terms}
+        query_text = query.lower().strip() if query else None
+        name_pattern = name.strip() if name else None
+
+        root = Path(path).expanduser().resolve()
+        repository = StateRepository()
+        state = repository.load(root)
+
+        matches: list[tuple[str, FileRecord, datetime | None, Path]] = []
+        fallback_timestamp = datetime.min.replace(tzinfo=timezone.utc)
+
+        for rel_path, record in state.files.items():
+            normalized_rel = _normalise_state_key(rel_path)
+            if name_pattern and not fnmatch.fnmatch(Path(normalized_rel).name, name_pattern):
+                continue
+
+            record_tags = [tag for tag in record.tags if tag]
+            record_categories = [category for category in record.categories if category]
+            record_tags_lower = {tag.lower() for tag in record_tags}
+            record_categories_lower = {category.lower() for category in record_categories}
+
+            if tag_filters and not tag_filters.issubset(record_tags_lower):
+                continue
+            if category_filters and not category_filters.issubset(record_categories_lower):
+                continue
+
+            if needs_review is not None and record.needs_review != needs_review:
+                continue
+
+            last_modified = record.last_modified
+            if last_modified is not None:
+                last_modified_utc = (
+                    last_modified.astimezone(timezone.utc)
+                    if last_modified.tzinfo is not None
+                    else last_modified.replace(tzinfo=timezone.utc)
+                )
+            else:
+                last_modified_utc = None
+
+            if before_dt and (last_modified_utc is None or last_modified_utc >= before_dt):
+                continue
+            if after_dt and (last_modified_utc is None or last_modified_utc < after_dt):
+                continue
+
+            if query_text:
+                haystack = [
+                    normalized_rel.lower(),
+                    " ".join(record_tags_lower),
+                    " ".join(record_categories_lower),
+                    (record.rename_suggestion or "").lower(),
+                    (record.reasoning or "").lower(),
+                ]
+                if not any(query_text in field for field in haystack if field):
+                    continue
+
+            absolute_path = (root / Path(normalized_rel)).resolve()
+            matches.append((normalized_rel, record, last_modified_utc, absolute_path))
+
+        total_matches = len(matches)
+        matches.sort(
+            key=lambda entry: entry[2] if entry[2] is not None else fallback_timestamp,
+            reverse=True,
+        )
+
+        displayed_matches = matches[:effective_limit] if effective_limit is not None else matches
+        truncated = total_matches - len(displayed_matches)
+        displayed_needs_review = sum(
+            1 for _, record, _, _ in displayed_matches if record.needs_review
+        )
+
+        json_results = [
+            {
+                "relative_path": rel_path,
+                "absolute_path": str(abs_path),
+                "tags": list(record.tags),
+                "categories": list(record.categories),
+                "needs_review": record.needs_review,
+                "confidence": record.confidence,
+                "last_modified": last_modified.isoformat() if last_modified else None,
+                "hash": record.hash,
+                "rename_suggestion": record.rename_suggestion,
+            }
+            for rel_path, record, last_modified, abs_path in displayed_matches
+        ]
+
+        counts: dict[str, Any] = {
+            "matches": len(displayed_matches),
+            "total": total_matches,
+            "needs_review": displayed_needs_review,
+        }
+        if effective_limit is not None:
+            counts["limit"] = effective_limit
+        if truncated > 0:
+            counts["truncated"] = truncated
+
+        context_payload = {
+            "root": str(root),
+            "query": query,
+            "name": name_pattern,
+            "tags": tag_terms,
+            "categories": category_terms,
+            "before": before_dt.isoformat() if before_dt else None,
+            "after": after_dt.isoformat() if after_dt else None,
+            "needs_review": needs_review,
+            "limit": effective_limit,
+        }
+
+        json_payload = {
+            "context": context_payload,
+            "counts": counts,
+            "results": json_results,
+        }
+
+        if json_enabled:
+            console.print_json(data=json_payload)
+            return
+
+        if not summary_only:
+            if displayed_matches:
+                table = Table(title=f"Search results for {root}")
+                table.add_column("Path", overflow="fold")
+                table.add_column("Tags", overflow="fold")
+                table.add_column("Categories", overflow="fold")
+                table.add_column("Confidence", justify="right")
+                table.add_column("Needs Review", justify="center")
+                table.add_column("Modified")
+                for rel_path, record, last_modified, _ in displayed_matches:
+                    table.add_row(
+                        rel_path,
+                        ", ".join(record.tags) or "-",
+                        ", ".join(record.categories) or "-",
+                        f"{record.confidence:.2f}" if record.confidence is not None else "-",
+                        "Yes" if record.needs_review else "No",
+                        last_modified.isoformat() if last_modified else "-",
+                    )
+                _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)
+            else:
+                _emit_message(
+                    "[yellow]No matching records found.[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+
+        if truncated > 0:
+            truncated_msg = (
+                f"[yellow]{truncated} additional result(s) omitted due to limit "
+                f"{effective_limit}.[/yellow]"
+            )
+            _emit_message(
+                truncated_msg,
+                mode="warning",
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
+
+        summary_metrics: dict[str, Any] = {
+            "matches": len(displayed_matches),
+            "total": total_matches,
+            "needs_review": displayed_needs_review,
+        }
+        if effective_limit is not None:
+            summary_metrics["limit"] = effective_limit
+        if truncated > 0:
+            summary_metrics["truncated"] = truncated
+
+        _emit_message(
+            _format_summary_line("Search", root, summary_metrics),
+            mode="summary",
+            quiet=quiet_enabled,
+            summary_only=summary_only,
+        )
+    except ConfigError as exc:
+        _handle_cli_error(str(exc), code="config_error", json_output=json_enabled, original=exc)
+    except MissingStateError as exc:
+        _handle_cli_error(
+            f"No organization state found for {path}. Run `dorgy org {path}` before searching.",
+            code="missing_state",
+            json_output=json_enabled,
+            original=exc,
+        )
+    except click.ClickException as exc:
+        _handle_cli_error(str(exc), code="cli_error", json_output=json_enabled, original=exc)
+    except Exception as exc:
+        _handle_cli_error(
+            f"Unexpected error while searching: {exc}",
+            code="internal_error",
+            json_output=json_enabled,
+            details={"exception": type(exc).__name__},
+            original=exc,
+        )
 
 
 @cli.command()
 @click.argument("source", type=click.Path(exists=True, path_type=str))
 @click.argument("destination", type=click.Path(path_type=str))
-def mv(**_: object) -> None:
-    """Move a file or directory within an organized collection.
+@click.option(
+    "--conflict-strategy",
+    type=click.Choice(["append_number", "timestamp", "skip"], case_sensitive=False),
+    help="Conflict resolution strategy when the destination already exists.",
+)
+@dry_run_option("Preview move/rename without applying changes.")
+@json_option("Emit JSON describing the move operation.")
+@summary_option()
+@quiet_option()
+@click.pass_context
+def mv(
+    ctx: click.Context,
+    source: str,
+    destination: str,
+    conflict_strategy: str | None,
+    dry_run: bool,
+    json_output: bool,
+    summary_mode: bool,
+    quiet: bool,
+) -> None:
+    """Move or rename tracked files within an organized collection."""
 
-    Args:
-        _: Placeholder for Click-injected keyword arguments.
+    json_enabled = json_output
+    try:
+        manager = ConfigManager()
+        manager.ensure_exists()
+        config = manager.load()
 
-    Returns:
-        None: This function is invoked for its side effects.
-    """
-    _not_implemented("dorgy mv")
+        mode: ModeResolution = resolve_mode_settings(
+            ctx,
+            config.cli,
+            quiet_flag=quiet,
+            summary_flag=summary_mode,
+            json_flag=json_output,
+        )
+        quiet_enabled = mode.quiet
+        summary_only = mode.summary
+        json_enabled = mode.json_output
+
+        default_strategy = (
+            config.cli.move_conflict_strategy or config.organization.conflict_resolution
+        )
+        strategy = (conflict_strategy or default_strategy or "append_number").lower()
+        if strategy not in {"append_number", "timestamp", "skip"}:
+            strategy = "append_number"
+
+        source_path = Path(source).expanduser().resolve()
+        if ".dorgy" in source_path.parts:
+            raise click.ClickException("Cannot move files within the .dorgy metadata directory.")
+
+        root = _detect_collection_root(source_path)
+        repository = StateRepository()
+        try:
+            state = repository.load(root)
+        except MissingStateError as exc:
+            missing_state_msg = (
+                f"No organization state found for {root}. "
+                f"Run `dorgy org {root}` before moving files."
+            )
+            raise click.ClickException(missing_state_msg) from exc
+
+        dest_candidate_input = Path(destination).expanduser()
+        if dest_candidate_input.is_absolute():
+            dest_candidate = dest_candidate_input
+        else:
+            dest_candidate = root / dest_candidate_input
+        dest_candidate = dest_candidate.resolve()
+
+        if dest_candidate.exists() and dest_candidate.is_dir():
+            destination_path = (dest_candidate / source_path.name).resolve()
+        else:
+            destination_path = dest_candidate
+
+        if ".dorgy" in destination_path.parts:
+            raise click.ClickException(
+                "Destination cannot be inside the .dorgy metadata directory."
+            )
+
+        try:
+            destination_path.relative_to(root)
+        except ValueError:
+            raise click.ClickException(
+                "Destination must reside within the same collection root as the source."
+            ) from None
+
+        resolved_path, conflict_applied, note, skipped_operation = _resolve_move_destination(
+            source_path, destination_path, strategy
+        )
+
+        if resolved_path is not None and resolved_path.resolve() == source_path.resolve():
+            skipped_operation = True
+
+        if resolved_path is not None and ".dorgy" in resolved_path.parts:
+            raise click.ClickException(
+                "Destination cannot be inside the .dorgy metadata directory."
+            )
+
+        if resolved_path is not None:
+            try:
+                resolved_path.relative_to(root)
+            except ValueError:
+                raise click.ClickException(
+                    "Resolved destination would leave the collection root; adjust the target path."
+                ) from None
+
+        plan = OperationPlan()
+        if note:
+            plan.notes.append(note)
+
+        counts: dict[str, Any] = {
+            "moved": 0,
+            "skipped": 0,
+            "conflicts": 1 if conflict_applied else 0,
+            "changes": 0,
+        }
+        changes: list[tuple[str, str]] = []
+        events: list[OperationEvent] = []
+
+        if skipped_operation or resolved_path is None:
+            counts["skipped"] = 1
+        else:
+            counts["moved"] = 1
+            changes = _plan_state_changes(state, root, source_path, resolved_path)
+            counts["changes"] = len(changes)
+            plan.moves.append(
+                MoveOperation(
+                    source=source_path,
+                    destination=resolved_path,
+                    conflict_strategy=strategy,
+                    conflict_applied=conflict_applied,
+                )
+            )
+
+        source_rel = _normalise_state_key(relative_to_collection(source_path, root))
+        resolved_rel = (
+            _normalise_state_key(relative_to_collection(resolved_path, root))
+            if resolved_path is not None
+            else None
+        )
+
+        if not skipped_operation and resolved_path is not None:
+            executor = OperationExecutor(staging_root=root / ".dorgy" / "staging")
+            if dry_run:
+                executor.apply(plan, root, dry_run=True)
+            else:
+                try:
+                    events = executor.apply(plan, root)
+                except Exception as exc:
+                    failure_msg = (
+                        "Failed to apply move operation: "
+                        f"{exc}. Check file permissions and availability."
+                    )
+                    raise click.ClickException(failure_msg) from exc
+                _apply_state_changes(state, changes)
+                repository.save(root, state)
+                if events:
+                    repository.append_history(root, events)
+
+        changes_payload = [
+            {"from": _normalise_state_key(old), "to": _normalise_state_key(new)}
+            for old, new in changes
+        ]
+        json_payload: dict[str, Any] = {
+            "context": {
+                "root": str(root),
+                "source": source_path.as_posix(),
+                "requested_destination": dest_candidate_input.as_posix(),
+                "resolved_destination": resolved_path.as_posix() if resolved_path else None,
+                "strategy": strategy,
+                "dry_run": dry_run,
+                "skipped": skipped_operation,
+            },
+            "counts": counts,
+            "plan": plan.model_dump(mode="json"),
+            "changes": changes_payload,
+        }
+        if plan.notes:
+            json_payload["notes"] = list(plan.notes)
+        if events:
+            json_payload["history"] = [event.model_dump(mode="json") for event in events]
+        if not dry_run and not skipped_operation:
+            json_payload["state"] = {
+                "path": str(root / ".dorgy" / "state.json"),
+                "files_tracked": len(state.files),
+            }
+
+        if json_enabled:
+            console.print_json(data=json_payload)
+            return
+
+        if not summary_only:
+            if skipped_operation:
+                message = (
+                    "[yellow]Move skipped due to conflict strategy.[/yellow]"
+                    if strategy == "skip"
+                    else "[yellow]Move skipped; destination matches source.[/yellow]"
+                )
+                _emit_message(
+                    message, mode="warning", quiet=quiet_enabled, summary_only=summary_only
+                )
+            elif dry_run:
+                _emit_message(
+                    f"[yellow]Dry run: would move {source_rel} -> {resolved_rel}.[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+            else:
+                _emit_message(
+                    f"[green]Moved {source_rel} -> {resolved_rel}.[/green]",
+                    mode="detail",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+
+            if plan.notes:
+                _emit_message(
+                    "[yellow]Notes:[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+                for entry in plan.notes:
+                    _emit_message(
+                        f"  - {entry}",
+                        mode="warning",
+                        quiet=quiet_enabled,
+                        summary_only=summary_only,
+                    )
+
+        summary_metrics: dict[str, Any] = {
+            "moved": counts["moved"],
+            "skipped": counts["skipped"],
+            "conflicts": counts["conflicts"],
+        }
+        if dry_run:
+            summary_metrics["dry_run"] = True
+        _emit_message(
+            _format_summary_line("Move", root, summary_metrics),
+            mode="summary",
+            quiet=quiet_enabled,
+            summary_only=summary_only,
+        )
+    except ConfigError as exc:
+        _handle_cli_error(str(exc), code="config_error", json_output=json_enabled, original=exc)
+    except MissingStateError as exc:
+        _handle_cli_error(
+            f"No organization state found for {source}. Run `dorgy org` before moving files.",
+            code="missing_state",
+            json_output=json_enabled,
+            original=exc,
+        )
+    except click.ClickException as exc:
+        _handle_cli_error(str(exc), code="cli_error", json_output=json_enabled, original=exc)
+    except Exception as exc:
+        _handle_cli_error(
+            f"Unexpected error while moving files: {exc}",
+            code="internal_error",
+            json_output=json_enabled,
+            details={"exception": type(exc).__name__},
+            original=exc,
+        )
 
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("--json", "json_output", is_flag=True, help="Emit status information as JSON.")
+@json_option("Emit status information as JSON.")
 @click.option(
     "--history",
     "history_limit",
@@ -1121,8 +2163,8 @@ def mv(**_: object) -> None:
     show_default=False,
     help="Number of recent history entries to include (defaults to configuration).",
 )
-@click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
-@click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@summary_option()
+@quiet_option()
 @click.pass_context
 def status(
     ctx: click.Context,
@@ -1132,19 +2174,7 @@ def status(
     summary_mode: bool,
     quiet: bool,
 ) -> None:
-    """Display a summary of the collection state for PATH.
-
-    Args:
-        ctx: Click context for parameter source inspection.
-        path: Root directory whose state should be inspected.
-        json_output: When True, emit JSON instead of textual output.
-        history_limit: Optional override for how many history entries to include.
-        summary_mode: When True, restrict output to summary lines and warnings.
-        quiet: When True, suppress non-error output entirely.
-
-    Raises:
-        click.ClickException: If state cannot be loaded or arguments conflict.
-    """
+    """Display a summary of the collection state for PATH."""
 
     json_enabled = json_output
     try:
@@ -1152,30 +2182,24 @@ def status(
         manager.ensure_exists()
         config = manager.load()
 
-        explicit_quiet = ctx.get_parameter_source("quiet") == ParameterSource.COMMANDLINE
-        explicit_summary = ctx.get_parameter_source("summary_mode") == ParameterSource.COMMANDLINE
         explicit_history = ctx.get_parameter_source("history_limit") == ParameterSource.COMMANDLINE
 
-        quiet_enabled = quiet if explicit_quiet else config.cli.quiet_default
-        summary_only = summary_mode if explicit_summary else config.cli.summary_default
+        mode: ModeResolution = resolve_mode_settings(
+            ctx,
+            config.cli,
+            quiet_flag=quiet,
+            summary_flag=summary_mode,
+            json_flag=json_output,
+        )
+        quiet_enabled = mode.quiet
+        summary_only = mode.summary
+        json_enabled = mode.json_output
+
         effective_history = (
             history_limit
             if explicit_history and history_limit is not None
             else config.cli.status_history_limit
         )
-
-        if json_output:
-            if explicit_quiet and quiet_enabled:
-                raise click.ClickException("--json cannot be combined with --quiet.")
-            if explicit_summary and summary_only:
-                raise click.ClickException("--json cannot be combined with --summary.")
-            quiet_enabled = False
-            summary_only = False
-
-        if quiet_enabled and summary_only:
-            raise click.ClickException(
-                "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
-            )
 
         root = Path(path).expanduser().resolve()
         repository = StateRepository()
@@ -1265,7 +2289,7 @@ def status(
         if plan_error:
             error_summary["last_plan"] = plan_error
 
-        if json_output:
+        if json_enabled:
             payload = {
                 "context": {"root": str(root)},
                 "counts": counts,
@@ -1397,10 +2421,10 @@ def status(
 
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
-@click.option("--dry-run", is_flag=True, help="Preview rollback without applying it.")
-@click.option("--json", "json_output", is_flag=True, help="Emit JSON describing the rollback plan.")
-@click.option("--summary", "summary_mode", is_flag=True, help="Only emit summary lines.")
-@click.option("--quiet", is_flag=True, help="Suppress non-error output.")
+@dry_run_option("Preview rollback without applying it.")
+@json_option("Emit JSON describing the rollback plan.")
+@summary_option()
+@quiet_option()
 @click.pass_context
 def undo(
     ctx: click.Context,
@@ -1410,19 +2434,7 @@ def undo(
     summary_mode: bool,
     quiet: bool,
 ) -> None:
-    """Rollback the last organization plan applied to PATH.
-
-    Args:
-        ctx: Click context for parameter inspection.
-        path: Root directory to roll back.
-        dry_run: If True, only preview the rollback operations.
-        json_output: When True, emit JSON instead of textual output.
-        summary_mode: When True, limit output to summary lines and warnings.
-        quiet: When True, suppress non-error output entirely.
-
-    Raises:
-        click.ClickException: If state is missing or rollback fails.
-    """
+    """Rollback the last organization plan applied to PATH."""
 
     json_enabled = json_output
     try:
@@ -1430,24 +2442,16 @@ def undo(
         manager.ensure_exists()
         config = manager.load()
 
-        explicit_quiet = ctx.get_parameter_source("quiet") == ParameterSource.COMMANDLINE
-        explicit_summary = ctx.get_parameter_source("summary_mode") == ParameterSource.COMMANDLINE
-
-        quiet_enabled = quiet if explicit_quiet else config.cli.quiet_default
-        summary_only = summary_mode if explicit_summary else config.cli.summary_default
-
-        if json_output:
-            if explicit_quiet and quiet_enabled:
-                raise click.ClickException("--json cannot be combined with --quiet.")
-            if explicit_summary and summary_only:
-                raise click.ClickException("--json cannot be combined with --summary.")
-            quiet_enabled = False
-            summary_only = False
-
-        if quiet_enabled and summary_only:
-            raise click.ClickException(
-                "Quiet and summary modes cannot both be enabled. Adjust CLI defaults or flags."
-            )
+        mode: ModeResolution = resolve_mode_settings(
+            ctx,
+            config.cli,
+            quiet_flag=quiet,
+            summary_flag=summary_mode,
+            json_flag=json_output,
+        )
+        quiet_enabled = mode.quiet
+        summary_only = mode.summary
+        json_enabled = mode.json_output
 
         root = Path(path).expanduser().resolve()
         repository = StateRepository()
@@ -1511,7 +2515,7 @@ def undo(
             json_payload["errors"] = error_summary
 
         if dry_run:
-            if json_output:
+            if json_enabled:
                 console.print_json(data=json_payload)
                 return
 
@@ -1628,7 +2632,7 @@ def undo(
             raise click.ClickException(str(exc)) from exc
 
         repository.save(root, state)
-        if json_output:
+        if json_enabled:
             payload = dict(json_payload)
             payload["rolled_back"] = True
             console.print_json(data=payload)
