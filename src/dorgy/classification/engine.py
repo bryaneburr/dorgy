@@ -235,7 +235,7 @@ class ClassificationEngine:
             "prompt": request.prompt or "",
         }
 
-        classification, rename = self._program.forward(payload)
+        classification, rename = self._program(payload)
 
         try:
             confidence = float(classification.confidence)
