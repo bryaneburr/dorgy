@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import shutil
 import threading
@@ -10,15 +11,15 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Literal, Optional
+from typing import Any, Callable, Iterable, Literal, Optional, cast
 
 try:  # pragma: no cover - optional dependency wiring
     from watchdog.events import FileSystemEvent, FileSystemEventHandler
     from watchdog.observers import Observer
 except ImportError:  # pragma: no cover - fallback when watchdog missing
-    Observer = None
-    FileSystemEvent = Any  # type: ignore[assignment]
-    FileSystemEventHandler = object  # type: ignore[assignment]
+    Observer = cast(Any, None)
+    FileSystemEvent = cast(Any, object)
+    FileSystemEventHandler = cast(Any, object)
 
 from dorgy.classification import ClassificationBatch, ClassificationCache
 from dorgy.cli_support import (
@@ -925,19 +926,21 @@ class _WatchEventHandler(FileSystemEventHandler):
         self,
         *,
         kind: Literal["created", "modified", "deleted", "moved"],
-        src_path: str,
-        dest_path: str | None = None,
+        src_path: str | bytes,
+        dest_path: str | bytes | None = None,
     ) -> None:
         """Queue filesystem events for downstream processing."""
 
-        src = Path(src_path).expanduser()
+        src_str = os.fsdecode(src_path)
+        src = Path(src_str).expanduser()
         if self._state_dirname in src.parts:
             return
         src = src.resolve(strict=False)
 
         dest: Path | None = None
         if dest_path is not None:
-            candidate = Path(dest_path).expanduser()
+            dest_str = os.fsdecode(dest_path)
+            candidate = Path(dest_str).expanduser()
             if self._state_dirname in candidate.parts:
                 dest = None
             else:

@@ -2,17 +2,32 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, cast
+
+DocumentConverter: Any = None
+InputFormat: Any = None
+_DOCLING_LOG_NAMES: list[str] = []
+_DOCLING_DEFAULT_LEVELS: dict[str, int] = {}
+
+_docling_datamodel: Any = None
+_docling_converter_module: Any = None
 
 try:  # pragma: no cover - optional dependency
-    from docling.datamodel.base_models import InputFormat
-    from docling.document_converter import DocumentConverter
+    _docling_datamodel = importlib.import_module("docling.datamodel.base_models")
+    _docling_converter_module = importlib.import_module("docling.document_converter")
+except ImportError:  # pragma: no cover
+    pass
+else:
+    InputFormat = getattr(_docling_datamodel, "InputFormat", None)
+    DocumentConverter = getattr(_docling_converter_module, "DocumentConverter", None)
 
+if InputFormat is not None and DocumentConverter is not None:
     _DOCLING_LOG_NAMES = [
         "docling",
         "docling_core",
@@ -21,22 +36,22 @@ try:  # pragma: no cover - optional dependency
         "docling.pipeline.standard_docx_pipeline",
         "docling.backend.docling_parse_v4_backend",
     ]
-    _DOCLING_DEFAULT_LEVELS: dict[str, int] = {}
+    _DOCLING_DEFAULT_LEVELS = {}
     for _name in _DOCLING_LOG_NAMES:
         logger = logging.getLogger(_name)
         _DOCLING_DEFAULT_LEVELS[_name] = logger.level
         logger.setLevel(logging.ERROR)
-except ImportError:  # pragma: no cover
-    DocumentConverter = None
+else:
     InputFormat = None
+    DocumentConverter = None
     _DOCLING_LOG_NAMES = []
     _DOCLING_DEFAULT_LEVELS = {}
 
 try:  # pragma: no cover - optional dependency
     from PIL import ExifTags, Image
 except ImportError:  # pragma: no cover - executed when Pillow missing
-    Image = None
-    ExifTags = None
+    Image = cast(Any, None)
+    ExifTags = cast(Any, None)
 
 
 class MetadataExtractor:
@@ -61,13 +76,10 @@ class MetadataExtractor:
     def __init__(self) -> None:
         """Initialise the metadata extractor and supporting converters."""
 
-        self._docling_converter: DocumentConverter | None = None
+        self._docling_converter: Any | None = None
         self._docling_lock = threading.Lock()
         self._docling_preview_cache: dict[Path, str] = {}
-        if DocumentConverter is None:
-            self._docling_enabled = False
-        else:
-            self._docling_enabled = True
+        self._docling_enabled: bool = DocumentConverter is not None
 
     def extract(
         self, path: Path, mime_type: str, sample_limit: int | None = None

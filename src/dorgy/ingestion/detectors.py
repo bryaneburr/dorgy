@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import mimetypes
 from pathlib import Path
-from typing import Tuple
+from typing import Any, Tuple
 
 try:
-    import magic  # type: ignore
+    import magic as _magic  # type: ignore[import-not-found]
 except ImportError:  # pragma: no cover - optional dependency
-    magic = None
+    _magic = None
+
+magic: Any | None = _magic
 
 
 class TypeDetector:
