@@ -13,6 +13,7 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
+from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.classification.models import ClassificationDecision
 from dorgy.config.models import LLMSettings
 from dorgy.ingestion.models import FileDescriptor
@@ -37,6 +38,7 @@ class StructurePlanner:
         self._enabled = not use_fallback and dspy is not None
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
         if self._enabled:
+            configure_dspy_logging()
             self._configure_language_model()
             self._program = dspy.Predict(FileTreeSignature)
             LOGGER.debug(

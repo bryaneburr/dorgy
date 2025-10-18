@@ -98,3 +98,8 @@
 - Surfaced vision metadata in `org`/`watch` JSON payloads (new per-file `vision` object) and documented automation expectations in README/AGENTS.
 - Persisted caption metadata into collection state records and added CLI coverage to verify prompts reach the captioner and stored records.
 - Next actions: begin Phase 7 search/index planning, incorporating the enriched vision metadata into indexing requirements.
+
+## 2025-10-26
+- Implemented a DSPy logging filter to drop the structured-output fallback warnings so CLI dry runs stay focused on actionable results.
+- Wired the filter into the classification engine, structure planner, and vision captioner initialization to keep suppression consistent across DSPy entry points.
+- Next actions: monitor upcoming DSPy releases for logging changes and backfill regression coverage if the warning signatures evolve.

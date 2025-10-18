@@ -21,6 +21,7 @@ dependencies = [
     "python-magic>=0.4.27",
     "xxhash>=3.4.1",
     "pydantic>=2.5",
+    "pillow-heif>=1.1.1",
 ]
 
 [project.optional-dependencies]

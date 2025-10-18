@@ -11,6 +11,7 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None  # type: ignore[assignment]
 
+from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.config.models import LLMSettings
 
 from .cache import VisionCache
@@ -50,6 +51,7 @@ class VisionCaptioner:
         self._cache = cache
         if self._cache is not None:
             self._cache.load()
+        configure_dspy_logging()
         self._configure_language_model()
         self._program = self._build_program()
 
