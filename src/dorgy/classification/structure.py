@@ -166,7 +166,10 @@ class StructurePlanner:
             'shape {"files": [{"source": "<original relative path>", "destination": '
             '"<relative destination path>"}]}. Do not include absolute paths or drive letters. '
             "Destinations must keep the original filename extension exactly once. Use hyphenated "
-            "folder names and avoid extremely long directory chains."
+            "folder names and avoid extremely long directory chains. Prefer placing files inside "
+            "meaningful directories instead of leaving them at the root; create subfolders when it "
+            "helps keep related items together, and only leave a file at the top level if no "
+            "sensible grouping exists."
         )
 
         try:

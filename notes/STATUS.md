@@ -108,3 +108,4 @@
 - Hardened `VisionCaptioner` image loading by registering optional Pillow plugins (HEIF/AVIF/JXL) when available and falling back to Pillow conversions when DSPy cannot ingest a file directly.
 - Added PNG conversion via in-memory buffers so HEIC/AVIF/JXL/ICO assets no longer trigger multimodal capability errors during captioning.
 - `uv run pytest` remains green (68 passed, 1 skipped); monitor watch/org runs against HEIC collections to confirm the regression is resolved.
+- Tweaked structure planner instructions to prioritise grouping files into directories so fewer items remain at the root level.
