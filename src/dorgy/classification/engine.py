@@ -23,6 +23,7 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
+from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.config.models import LLMSettings
 
 from .models import (
@@ -66,7 +67,7 @@ class ClassificationEngine:
                 "dependencies), or set DORGY_USE_FALLBACK=1 to enable the heuristic classifier."
             )
 
-        self._settings = settings or LLMSettings()
+        configure_dspy_logging()
         self._configure_language_model()
         self._program = self._build_program()
         self._has_dspy = True

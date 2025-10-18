@@ -268,6 +268,32 @@ def descriptor_to_record(
     rename_suggestion: Optional[str] = None
     reasoning: Optional[str] = None
     needs_review = False
+    vision_caption = descriptor.metadata.get("vision_caption")
+    raw_labels = descriptor.metadata.get("vision_labels")
+    if isinstance(raw_labels, list):
+        vision_labels = [str(label).strip() for label in raw_labels if str(label).strip()]
+    elif isinstance(raw_labels, str):
+        vision_labels = [part.strip() for part in raw_labels.split(",") if part.strip()]
+    else:
+        vision_labels = []
+
+    raw_confidence = descriptor.metadata.get("vision_confidence")
+    vision_confidence: Optional[float] = None
+    if isinstance(raw_confidence, (int, float)):
+        vision_confidence = float(raw_confidence)
+    elif isinstance(raw_confidence, str):
+        try:
+            vision_confidence = float(raw_confidence)
+        except ValueError:
+            vision_confidence = None
+
+    vision_reasoning = descriptor.metadata.get("vision_reasoning")
+    if isinstance(vision_reasoning, str) and not vision_reasoning.strip():
+        vision_reasoning = None
+    if vision_caption is not None and isinstance(vision_caption, str):
+        vision_caption = vision_caption.strip() or None
+    else:
+        vision_caption = None
 
     if decision is not None:
         categories = [decision.primary_category]
@@ -288,6 +314,10 @@ def descriptor_to_record(
         rename_suggestion=rename_suggestion,
         reasoning=reasoning,
         needs_review=needs_review,
+        vision_caption=vision_caption,
+        vision_labels=vision_labels,
+        vision_confidence=vision_confidence,
+        vision_reasoning=vision_reasoning,
     )
 
 

@@ -11,3 +11,4 @@
 - Watch JSON payloads now include `started_at`, `completed_at`, and `duration_seconds`; maintain these fields when extending watch automation hooks to keep downstream tooling stable.
 - Ingestion and classification workers respect `processing.parallel_workers`; keep concurrency changes thread-safe and continue to emit debug timing logs so slow providers can be diagnosed.
 - CLI command docstrings should remain single-line summaries so `dorgy --help` output stays concise; avoid embedding argument details inside the docstrings.
+- Vision captioning depends on Pillow image plugins for some formats; the runtime auto-registers `pillow-heif`, `pillow-avif-plugin`/`pillow-avif`, and `pillow-jxl`/`pillow-jxl-plugin` when installed, so pull in the relevant optional dependency when testing HEIC/AVIF/JPEG XL assets.

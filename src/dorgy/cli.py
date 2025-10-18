@@ -26,7 +26,7 @@ from rich.progress import (
 from rich.syntax import Syntax
 from rich.table import Table
 
-from dorgy.classification import ClassificationCache
+from dorgy.classification import ClassificationCache, VisionCache, VisionCaptioner
 from dorgy.classification.structure import StructurePlanner
 from dorgy.cli_options import (
     ModeResolution,
@@ -792,6 +792,15 @@ def org(
         state_dir = target_root / ".dorgy"
         staging_dir = None if dry_run else state_dir / "staging"
         classification_cache = ClassificationCache(state_dir / "classifications.json")
+        vision_cache: VisionCache | None = None
+        vision_captioner: VisionCaptioner | None = None
+        if config.processing.process_images:
+            vision_cache = VisionCache(state_dir / "vision.json")
+            vision_cache.load()
+            try:
+                vision_captioner = VisionCaptioner(config.llm, cache=vision_cache)
+            except RuntimeError as exc:
+                raise click.ClickException(str(exc)) from exc
 
         pipeline = IngestionPipeline(
             scanner=scanner,
@@ -801,6 +810,7 @@ def org(
             processing=config.processing,
             staging_dir=staging_dir,
             allow_writes=not dry_run,
+            vision_captioner=vision_captioner,
         )
 
         planner = OrganizerPlanner()
@@ -873,7 +883,10 @@ def org(
             result = pipeline.run(
                 [source_root],
                 on_stage=_ingestion_stage if progress_enabled else None,
+                prompt=prompt,
             )
+            if not dry_run and vision_captioner is not None:
+                vision_captioner.save_cache()
             files_total = len(result.processed)
             ingestion_task.complete(f"Ingestion complete ({files_total} file(s))")
 
@@ -997,6 +1010,15 @@ def org(
             final_path = move_target or rename_target or original_path
             final_path_map[original_path] = final_path
 
+            vision_metadata: dict[str, Any] | None = None
+            if config.processing.process_images and descriptor.metadata.get("vision_caption"):
+                vision_metadata = {
+                    "caption": descriptor.metadata.get("vision_caption"),
+                    "labels": descriptor.metadata.get("vision_labels"),
+                    "confidence": descriptor.metadata.get("vision_confidence"),
+                    "reasoning": descriptor.metadata.get("vision_reasoning"),
+                }
+
             file_entries.append(
                 {
                     "original_path": original_path.as_posix(),
@@ -1005,6 +1027,7 @@ def org(
                     "classification": decision.model_dump(mode="json")
                     if decision is not None
                     else None,
+                    "vision": vision_metadata,
                     "operations": {
                         "rename": rename_target.as_posix() if rename_target is not None else None,
                         "move": move_target.as_posix() if move_target is not None else None,

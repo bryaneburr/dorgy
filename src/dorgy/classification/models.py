@@ -60,3 +60,19 @@ class ClassificationBatch(BaseModel):
 
     decisions: List[Optional[ClassificationDecision]] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
+
+
+class VisionCaption(BaseModel):
+    """Captioning result derived from a DSPy image signature.
+
+    Attributes:
+        caption: Concise textual description of the image.
+        labels: Short labels summarizing key elements within the image.
+        confidence: Confidence score between 0 and 1 when provided by the model.
+        reasoning: Optional reasoning or explanation returned by the model.
+    """
+
+    caption: str
+    labels: List[str] = Field(default_factory=list)
+    confidence: Optional[float] = None
+    reasoning: Optional[str] = None

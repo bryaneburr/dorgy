@@ -90,3 +90,22 @@
 - Adjusted the MyPy step to `uv run mypy src main.py` so the workflow targets our packages explicitly and avoids empty invocations.
 - Resolved CI-only MyPy complaints by refining optional dependency shims for `python-magic` and `watchdog`, ensuring stub fallbacks use explicit ignores without clashing with module assignments.
 - Next actions: monitor initial workflow runs, then expand coverage (matrix/caching or additional hooks) once baseline stability is confirmed.
+
+## 2025-10-25
+- Kicked off Phase 5.8 implementation by adding `VisionCaptioner` (DSPy image signature) plus `VisionCache` persistence, wiring ingestion to request captions when `processing.process_images` is enabled, and surfacing caption/label metadata on descriptors.
+- Updated CLI and watch flows to instantiate the captioner, reuse cached results under `.dorgy/vision.json`, and persist caches post-run; errors now surface when the configured model lacks vision support.
+- Enriched tags/previews with caption output, extended config defaults/documentation to the new `process_images` toggle, and added type hints to all DSPy signatures for consistency.
+- Surfaced vision metadata in `org`/`watch` JSON payloads (new per-file `vision` object) and documented automation expectations in README/AGENTS.
+- Persisted caption metadata into collection state records and added CLI coverage to verify prompts reach the captioner and stored records.
+- Next actions: begin Phase 7 search/index planning, incorporating the enriched vision metadata into indexing requirements.
+
+## 2025-10-26
+- Implemented a DSPy logging filter to drop the structured-output fallback warnings so CLI dry runs stay focused on actionable results.
+- Wired the filter into the classification engine, structure planner, and vision captioner initialization to keep suppression consistent across DSPy entry points.
+- Next actions: monitor upcoming DSPy releases for logging changes and backfill regression coverage if the warning signatures evolve.
+
+## 2025-10-27
+- Hardened `VisionCaptioner` image loading by registering optional Pillow plugins (HEIF/AVIF/JXL) when available and falling back to Pillow conversions when DSPy cannot ingest a file directly.
+- Added PNG conversion via in-memory buffers so HEIC/AVIF/JXL/ICO assets no longer trigger multimodal capability errors during captioning.
+- `uv run pytest` remains green (68 passed, 1 skipped); monitor watch/org runs against HEIC collections to confirm the regression is resolved.
+- Tweaked structure planner instructions to prioritise grouping files into directories so fewer items remain at the root level.

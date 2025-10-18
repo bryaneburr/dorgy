@@ -6,5 +6,6 @@
 - Unit tests for classification scaffolding live under `tests/`; mock DSPy interactions to keep the suite hermetic.
 - The heuristic fallback should remain deterministic; adjust `tests/test_classification_engine.py` if logic changes.
 - `ClassificationCache` persists decisions in `.dorgy/classifications.json`. Respect dry-run semantics and remember to guard writes behind the rename toggle.
+- `VisionCaptioner` wraps DSPy image signatures; it should fail fast when the configured model lacks vision support and reuse `VisionCache` entries in `.dorgy/vision.json` to limit repeat calls. Pass user prompts through when available so descriptors and downstream consumers receive context-aware captions.
 - DSPy runs by default; set `DORGY_USE_FALLBACK=1` only when explicitly testing the heuristic classifier (CI, local dev).
 - DSPy integration pulls runtime settings from `DorgyConfig.llm`; when adding new parameters (e.g., custom gateways) keep the configuration model, CLI overrides, and LM wiring in sync.

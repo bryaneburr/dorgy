@@ -144,6 +144,51 @@
 - Draft CLI UX (flags/messages) and circulate for review before wiring destructive behavior.
 
 
+## Phase 5.8 – Vision-Enriched Classification
+
+### Objectives
+- Deliver multimodal understanding so image-heavy collections benefit from captions, tags, and richer reasoning instead of MIME-only heuristics.
+- Respect `processing.process_images` and allow automation to opt-in/out at runtime while keeping ingestion/watch pipelines deterministic when vision is disabled.
+- Minimize duplicate inference cost by caching caption/tag payloads and reusing them across organization runs and watch batches.
+
+### Scope & Milestones
+1. **Vision Provider Integration**
+   - Implement a `VisionCaptioner` DSPy module that declares a signature using `dspy.Image` inputs and reuses the configured `llm` provider/model; surface informative errors if the model does not support vision.
+   - Add rate-limit/backoff handling plus structured error reporting so vision failures degrade gracefully.
+
+2. **Ingestion Pipeline Updates**
+   - When `process_images` is true and the mime is `image/*`, invoke the DSPy captioner (passing along user prompts) to obtain a caption + key labels; persist results on the `FileDescriptor` (`preview`, `tags`, and `metadata["vision_caption"]`/`["vision_labels"]`).
+   - Store vision outputs in the classification cache keyed by content hash and reuse them for subsequent runs (ingestion and watch).
+   - Capture timing/skip reasons in debug logs and expose suppressed vision work in dry-run/JSON outputs for auditability.
+
+3. **Classification & Organization Enhancements**
+   - Update DSPy prompt assembly to include caption/labels snippets, and refresh fallback heuristics to leverage the additional tags.
+   - Adjust structure planner payloads so tree proposals can group images based on captions/categories.
+   - Add regression tests ensuring both DSPy and fallback flows produce richer categories for representative image fixtures.
+
+4. **Documentation & Coordination**
+   - Document configuration prerequisites and provider-specific considerations in SPEC Phase 5.8, README, and AGENTS (classification + ingestion).
+   - Update CLI help/flags to mention vision behaviour and provide guidance when the feature is disabled.
+   - Note ongoing tasks, blockers, and automation touchpoints in `notes/STATUS.md` during implementation.
+
+### Dependencies & Sequencing
+- Requires classification cache schema adjustments; coordinate with any concurrent cache work to avoid conflicts.
+- Lean on existing ingestion extractors and watch batching infrastructure (Phase 5/5.5) to schedule caption jobs.
+- DSPy program updates must follow any prompt/template refactors from Phase 3 to prevent regressions.
+
+### Risks & Mitigations
+- **Inference Cost/Latency:** Batch caption requests where providers allow and honour user-specified limits; log skip reasons for transparency.
+- **Provider Capability Drift:** Encapsulate prompt/response parsing per adapter with fixtures so upgrades require minimal changes.
+- **Security/Privacy:** Provide configuration/CLI switches to fully disable remote vision calls; log when files are skipped due to policy.
+- **Cache Staleness:** Include hash + model/version metadata in cache entries and invalidate when models change.
+
+### Success Criteria
+- Enabling `processing.process_images` yields human-readable captions and labels stored on descriptors and visible in CLI/JSON outputs, produced via the DSPy image signature with user prompts applied when provided.
+- Classification decisions for images reference caption content (tags, reasoning) and tests verify improved categorization vs. pre-vision baselines.
+- Watch and re-run flows reuse cached captions without redundant provider calls, with metrics confirming cache hits.
+- Documentation clearly communicates configuration, limitations, and troubleshooting steps for the vision pipeline.
+
+
 ## Phase 6 – CLI Surface Implementation Plan
 
 ### Objectives
