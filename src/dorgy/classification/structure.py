@@ -23,9 +23,9 @@ LOGGER = logging.getLogger(__name__)
 class FileTreeSignature(dspy.Signature):  # type: ignore[misc]
     """DSPy signature that requests a destination tree proposal."""
 
-    files_json = dspy.InputField()
-    goal = dspy.InputField()
-    tree_json = dspy.OutputField()
+    files_json: str = dspy.InputField()
+    goal: str = dspy.InputField()
+    tree_json: str = dspy.OutputField()
 
 
 class StructurePlanner:

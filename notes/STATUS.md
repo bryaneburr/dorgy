@@ -90,3 +90,11 @@
 - Adjusted the MyPy step to `uv run mypy src main.py` so the workflow targets our packages explicitly and avoids empty invocations.
 - Resolved CI-only MyPy complaints by refining optional dependency shims for `python-magic` and `watchdog`, ensuring stub fallbacks use explicit ignores without clashing with module assignments.
 - Next actions: monitor initial workflow runs, then expand coverage (matrix/caching or additional hooks) once baseline stability is confirmed.
+
+## 2025-10-25
+- Kicked off Phase 5.8 implementation by adding `VisionCaptioner` (DSPy image signature) plus `VisionCache` persistence, wiring ingestion to request captions when `processing.process_images` is enabled, and surfacing caption/label metadata on descriptors.
+- Updated CLI and watch flows to instantiate the captioner, reuse cached results under `.dorgy/vision.json`, and persist caches post-run; errors now surface when the configured model lacks vision support.
+- Enriched tags/previews with caption output, extended config defaults/documentation to the new `process_images` toggle, and added type hints to all DSPy signatures for consistency.
+- Surfaced vision metadata in `org`/`watch` JSON payloads (new per-file `vision` object) and documented automation expectations in README/AGENTS.
+- Persisted caption metadata into collection state records and added CLI coverage to verify prompts reach the captioner and stored records.
+- Next actions: begin Phase 7 search/index planning, incorporating the enriched vision metadata into indexing requirements.

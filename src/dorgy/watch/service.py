@@ -25,7 +25,12 @@ else:  # pragma: no cover - runtime optional dependency wiring
         FileSystemEventHandler = cast(Any, object)  # type: ignore[assignment]
         Observer = cast(Any, None)  # type: ignore[assignment]
 
-from dorgy.classification import ClassificationBatch, ClassificationCache
+from dorgy.classification import (
+    ClassificationBatch,
+    ClassificationCache,
+    VisionCache,
+    VisionCaptioner,
+)
 from dorgy.cli_support import (
     build_original_snapshot,
     collect_error_payload,
@@ -175,6 +180,7 @@ class WatchService:
         self._stop_event = threading.Event()
         self._pending_lock = threading.Lock()
         self._classification_caches: dict[Path, ClassificationCache] = {}
+        self._vision_caches: dict[Path, VisionCache] = {}
         self._batch_counter = 0
         self._watch_settings = config.processing.watch
         self._debounce_seconds = (
@@ -451,6 +457,19 @@ class WatchService:
                 cache = ClassificationCache(cache_path)
                 self._classification_caches[source_root] = cache
 
+            vision_cache: VisionCache | None = None
+            vision_captioner: VisionCaptioner | None = None
+            if self._config.processing.process_images:
+                vision_cache = self._vision_caches.get(source_root)
+                if vision_cache is None:
+                    vision_cache = VisionCache(state_dir / "vision.json")
+                    vision_cache.load()
+                    self._vision_caches[source_root] = vision_cache
+                try:
+                    vision_captioner = VisionCaptioner(self._config.llm, cache=vision_cache)
+                except RuntimeError as exc:
+                    raise RuntimeError(str(exc)) from exc
+
             max_size_bytes = None
             if self._config.processing.max_file_size_mb > 0:
                 max_size_bytes = self._config.processing.max_file_size_mb * 1024 * 1024
@@ -470,9 +489,12 @@ class WatchService:
                 processing=self._config.processing,
                 staging_dir=staging_dir,
                 allow_writes=not self._dry_run,
+                vision_captioner=vision_captioner,
             )
 
-            result = pipeline.run(ingestion_inputs)
+            result = pipeline.run(ingestion_inputs, prompt=self._prompt)
+            if not self._dry_run and vision_captioner is not None:
+                vision_captioner.save_cache()
             parallel_workers = max(1, self._config.processing.parallel_workers)
             classification_batch = run_classification(
                 result.processed,
@@ -512,12 +534,24 @@ class WatchService:
                 final_path = move_target or rename_target or original_path
                 final_path_map[original_path] = final_path
 
+                vision_metadata: dict[str, Any] | None = None
+                if self._config.processing.process_images and descriptor.metadata.get(
+                    "vision_caption"
+                ):
+                    vision_metadata = {
+                        "caption": descriptor.metadata.get("vision_caption"),
+                        "labels": descriptor.metadata.get("vision_labels"),
+                        "confidence": descriptor.metadata.get("vision_confidence"),
+                        "reasoning": descriptor.metadata.get("vision_reasoning"),
+                    }
+
                 file_entries.append(
                     {
                         "original_path": original_path.as_posix(),
                         "final_path": final_path.as_posix(),
                         "descriptor": descriptor.model_dump(mode="json"),
                         "classification": decision.model_dump(mode="json") if decision else None,
+                        "vision": vision_metadata,
                         "operations": {
                             "rename": rename_target.as_posix() if rename_target else None,
                             "move": move_target.as_posix() if move_target else None,

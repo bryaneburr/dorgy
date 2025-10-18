@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from PIL import Image
 
+from dorgy.classification import VisionCaption
 from dorgy.cli import cli
 from dorgy.ingestion.extractors import MetadataExtractor
 
@@ -168,6 +170,69 @@ def test_cli_org_renames_files_when_enabled(tmp_path: Path) -> None:
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert "documents/report-2020.TXT" in state["files"]
     assert state["files"]["documents/report-2020.TXT"]["rename_suggestion"] == "report-2020"
+
+
+def test_cli_org_records_vision_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Vision metadata is persisted to state records when captioning is enabled."""
+
+    root = tmp_path / "vision"
+    root.mkdir()
+    image_path = root / "receipt.png"
+    Image.new("RGB", (64, 64), color="white").save(image_path)
+
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("processing:\n  process_images: true\n", encoding="utf-8")
+
+    class StubVisionCaptioner:
+        """Stub captioner capturing prompt usage."""
+
+        instances: list["StubVisionCaptioner"] = []
+
+        def __init__(self, *args, **kwargs) -> None:  # pragma: no cover - simple stub
+            self.calls: list[tuple[Path, str | None, str | None]] = []
+            StubVisionCaptioner.instances.append(self)
+
+        def caption(
+            self,
+            path: Path,
+            *,
+            cache_key: str | None,
+            prompt: str | None = None,
+        ) -> VisionCaption:
+            self.calls.append((path, cache_key, prompt))
+            return VisionCaption(
+                caption="Receipt from ACME Corp",
+                labels=["Finance", "Receipt"],
+                confidence=0.95,
+                reasoning="Test caption",
+            )
+
+        def save_cache(self) -> None:
+            return None
+
+    monkeypatch.setattr("dorgy.cli.VisionCaptioner", StubVisionCaptioner)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["org", str(root), "--prompt", "Highlight receipts"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert StubVisionCaptioner.instances
+    assert StubVisionCaptioner.instances[0].calls
+    assert StubVisionCaptioner.instances[0].calls[0][2] == "Highlight receipts"
+
+    state_path = root / ".dorgy" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    record = next(rec for rec in state["files"].values() if rec.get("vision_caption"))
+    assert record["vision_caption"] == "Receipt from ACME Corp"
+    assert record["vision_labels"] == ["Finance", "Receipt"]
+    assert pytest.approx(record["vision_confidence"], rel=1e-3) == 0.95
+    assert record["vision_reasoning"] == "Test caption"
 
 
 def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:

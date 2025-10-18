@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from dorgy.classification.models import VisionCaption
 from dorgy.config.models import CorruptedFilePolicy, LockedFilePolicy, ProcessingOptions
 from dorgy.ingestion import IngestionPipeline
 from dorgy.ingestion.detectors import HashComputer, TypeDetector
@@ -88,6 +89,65 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
 
     assert not result.needs_review
     assert not result.errors
+
+
+def test_ingestion_pipeline_enriches_images_with_captions(tmp_path: Path) -> None:
+    """Ensure image descriptors integrate DSPy caption output when enabled."""
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (64, 64), color="blue").save(image_path)
+
+    class StubVisionCaptioner:
+        """Vision captioner stub returning a fixed caption."""
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[Path, str | None, str | None]] = []
+
+        def caption(
+            self,
+            path: Path,
+            *,
+            cache_key: str | None,
+            prompt: str | None = None,
+        ) -> VisionCaption:
+            self.calls.append((path, cache_key, prompt))
+            return VisionCaption(
+                caption="A blue square with even lighting.",
+                labels=["Artwork", "Blue"],
+                confidence=0.8734,
+                reasoning="Synthetic test caption.",
+            )
+
+    captioner = StubVisionCaptioner()
+
+    processing = ProcessingOptions(process_images=True)
+    pipeline = IngestionPipeline(
+        scanner=DirectoryScanner(
+            recursive=False,
+            include_hidden=False,
+            follow_symlinks=False,
+            max_size_bytes=None,
+        ),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(),
+        processing=processing,
+        vision_captioner=captioner,  # type: ignore[arg-type]
+    )
+
+    result = pipeline.run([tmp_path], prompt="Highlight receipts")
+
+    assert len(captioner.calls) == 1
+    descriptor = result.processed[0]
+    assert descriptor.preview == "A blue square with even lighting."
+    assert descriptor.metadata["vision_caption"] == "A blue square with even lighting."
+    assert descriptor.metadata["vision_labels"] == "Artwork, Blue"
+    assert descriptor.metadata["vision_confidence"] == "0.873"
+    assert descriptor.metadata["vision_reasoning"] == "Synthetic test caption."
+    assert captioner.calls[0][2] == "Highlight receipts"
+    # Ensure labels are merged into tags alongside the MIME-derived category.
+    assert "Artwork" in descriptor.tags
+    assert "Blue" in descriptor.tags
 
 
 def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
