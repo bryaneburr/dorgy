@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from pathlib import Path
 from typing import Optional
@@ -18,6 +19,57 @@ from .cache import VisionCache
 from .models import VisionCaption
 
 LOGGER = logging.getLogger(__name__)
+
+_PILLOW_PLUGINS_INITIALISED = False
+
+
+def _ensure_pillow_plugins_registered() -> None:
+    """Register optional Pillow image plugins (HEIF/AVIF/JXL) when available."""
+
+    global _PILLOW_PLUGINS_INITIALISED
+    if _PILLOW_PLUGINS_INITIALISED:
+        return
+
+    plugin_specs: tuple[tuple[tuple[str, ...], str | None], ...] = (
+        (("pillow_heif",), "register_heif_opener"),
+        (("pillow_avif",), "register_avif_opener"),
+        (("pillow_jxl",), "register_jxl_opener"),
+    )
+
+    for module_names, registrar in plugin_specs:
+        module = None
+        module_name = None
+        for candidate in module_names:
+            try:
+                module = importlib.import_module(candidate)
+                module_name = candidate
+                break
+            except ImportError:
+                continue
+
+        if module is None:
+            continue
+
+        registration_fn = getattr(module, registrar, None) if registrar else None
+        if callable(registration_fn):
+            try:
+                registration_fn()
+            except Exception as exc:  # pragma: no cover - registration best effort
+                LOGGER.debug(
+                    "Failed to register Pillow plugin %s via %s: %s",
+                    module_name,
+                    registrar,
+                    exc,
+                )
+                continue
+        elif registrar:
+            LOGGER.debug(
+                "Pillow plugin %s does not expose %s; assuming import side effects.",
+                module_name,
+                registrar,
+            )
+
+    _PILLOW_PLUGINS_INITIALISED = True
 
 
 class VisionCaptioner:
@@ -54,6 +106,7 @@ class VisionCaptioner:
         configure_dspy_logging()
         self._configure_language_model()
         self._program = self._build_program()
+        self._fatal_error: str | None = None
 
     def caption(
         self,
@@ -73,6 +126,14 @@ class VisionCaptioner:
             Optional[VisionCaption]: Captioning result or ``None`` when unavailable.
         """
 
+        if self._fatal_error is not None:
+            LOGGER.debug(
+                "Skipping vision captioning for %s due to prior fatal error: %s",
+                path,
+                self._fatal_error,
+            )
+            return None
+
         if cache_key and self._cache is not None:
             cached = self._cache.get(cache_key)
             if cached is not None:
@@ -89,12 +150,14 @@ class VisionCaptioner:
         try:
             response = self._program(image=image_input, prompt=full_prompt)
         except Exception as exc:  # pragma: no cover - DSPy runtime errors
-            LOGGER.debug("Vision captioner failed: %s", exc)
+            error_message = self._format_exception(exc)
+            LOGGER.debug("Vision captioner failed: %s", error_message)
+            self._fatal_error = error_message
             raise RuntimeError(
-                (
-                    "Image captioning failed. Ensure your configured LLM model "
-                    "supports multimodal inputs."
-                )
+                "Image captioning failed. The configured LLM rejected the image request. "
+                "Provider response: "
+                f"{error_message}. Configure a multimodal-capable model or disable "
+                "`process_images`."
             ) from exc
 
         caption_text = getattr(response, "caption", "") if response else ""
@@ -128,6 +191,12 @@ class VisionCaptioner:
 
         if self._cache is not None:
             self._cache.save()
+
+    @property
+    def fatal_error(self) -> Optional[str]:
+        """Return the last fatal error reported by the captioner, if any."""
+
+        return self._fatal_error
 
     def _configure_language_model(self) -> None:
         """Configure the DSPy language model according to LLM settings."""
@@ -211,11 +280,69 @@ class VisionCaptioner:
     def _load_image(path: Path):
         """Return a DSPy image payload for the supplied path."""
 
+        errors: list[str] = []
+
         if hasattr(dspy.Image, "from_path"):
-            return dspy.Image.from_path(str(path))
+            try:
+                return dspy.Image.from_path(str(path))
+            except Exception as exc:  # pragma: no cover - DSPy backend specifics
+                LOGGER.debug("dspy.Image.from_path failed for %s: %s", path, exc)
+                errors.append(f"from_path: {exc}")
         if hasattr(dspy.Image, "from_file"):
-            return dspy.Image.from_file(str(path))
+            try:
+                return dspy.Image.from_file(str(path))
+            except Exception as exc:  # pragma: no cover - DSPy backend specifics
+                LOGGER.debug("dspy.Image.from_file failed for %s: %s", path, exc)
+                errors.append(f"from_file: {exc}")
         if hasattr(dspy.Image, "from_bytes"):
             data = path.read_bytes()
-            return dspy.Image.from_bytes(data)
-        raise RuntimeError("Unable to construct a DSPy image payload from the provided path.")
+            try:
+                return dspy.Image.from_bytes(data)
+            except Exception as exc:  # pragma: no cover - DSPy backend specifics
+                LOGGER.debug("dspy.Image.from_bytes failed for %s: %s", path, exc)
+                errors.append(f"from_bytes: {exc}")
+
+        converted = VisionCaptioner._load_via_pillow(path)
+        if converted is not None and hasattr(dspy.Image, "from_PIL"):
+            try:
+                return dspy.Image.from_PIL(converted)
+            except Exception as exc:  # pragma: no cover - conversion errors
+                LOGGER.debug("dspy.Image.from_PIL failed for %s: %s", path, exc)
+                errors.append(f"from_PIL: {exc}")
+
+        details = "; ".join(errors) if errors else "No valid DSPy image constructors available."
+        raise RuntimeError(
+            "Unable to construct a DSPy image payload from the provided path: "
+            f"{path}. Details: {details}"
+        )
+
+    @staticmethod
+    def _load_via_pillow(path: Path):
+        """Open the file via Pillow and return a converted RGB image when possible."""
+
+        try:
+            from PIL import Image
+        except ImportError:  # pragma: no cover - Pillow optional
+            LOGGER.debug("Pillow is not installed; cannot convert %s", path)
+            return None
+
+        _ensure_pillow_plugins_registered()
+
+        try:
+            with Image.open(path) as image:
+                converted = image.convert("RGB")
+                converted.load()
+        except Exception as exc:
+            LOGGER.debug("Pillow failed to load %s: %s", path, exc)
+            return None
+
+        return converted
+
+    @staticmethod
+    def _format_exception(exc: Exception) -> str:
+        """Return a normalized string describing the supplied exception."""
+
+        message = str(exc).strip()
+        if not message:
+            message = repr(exc)
+        return f"{exc.__class__.__name__}: {message}"

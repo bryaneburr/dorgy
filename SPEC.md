@@ -463,6 +463,7 @@ The project will progress through the following phases. Update the status column
 - `processing.process_images` enables multimodal captioning that generates textual descriptions, key entities, and confidence scores for images and other visual assets; descriptors carry these summaries so DSPy receives meaningful context.
 - Captioning output is captured by a DSPy program that uses `dspy.Image` inputs with the configured LLM; results are stored alongside existing classification cache metadata and reused by ingest/watch pipelines.
 - Classifier heuristics fall back to the captions/tags when DSPy is disabled, while CLI/JSON outputs expose the captured vision metadata for automation.
+- Optional Pillow plugins (e.g., `pillow-heif`, `pillow-avif-plugin`, `pillow-avif`, `pillow-jxl`, `pillow-jxl-plugin`) are auto-registered when present so HEIC/AVIF/JPEG XL assets flow through the captioner without additional configuration.
 
 ### Goals
 - Reuse the configured `llm` provider/model for captioning when `process_images` is true by invoking a dedicated DSPy signature that accepts `dspy.Image` inputs; surface clear errors when the model lacks vision capabilities.
@@ -477,11 +478,20 @@ The project will progress through the following phases. Update the status column
 - Expanded classification engine tests ensuring DSPy payloads contain caption/text pairs, along with fixtures verifying heuristic improvements.
 - CLI JSON payloads (`org`, `watch`) now emit a `vision` object per file when captions are available, and SPEC/AGENTS documentation captures the new automation hooks.
 - Collection state records persist caption metadata (`vision_caption`, `vision_labels`, `vision_confidence`, `vision_reasoning`) so downstream history/export tooling retains image context.
+- Image loading fallbacks rely on Pillow to convert unsupported formats to PNG before invoking DSPy, ensuring HEIC/AVIF/JXL/ICO/BMP assets participate in captioning when the relevant plugins are installed.
 
 ### Risks & Mitigations
 - **Latency/Cost:** Run captioning asynchronously with retry/backoff and enforce per-run limits; provide CLI notes when captions are skipped due to provider errors.
 - **Provider Drift:** Encapsulate provider-specific prompts/response parsing in adapters with unit tests; surface informative errors when API capabilities are missing.
 - **Privacy/Security:** Honour `processing.process_images` or CLI flags to opt out per-run and log when files are skipped to aid auditing.
+
+### Future Work – Image-only PDF OCR Plan
+- **Detection:** Augment the ingestion pipeline to flag PDFs whose pages lack textual content after Docling extraction, treating them as image-only candidates.
+- **Rendering:** Use a headless renderer (`pdf2image`, Poppler bindings, or Docling page rasterisation) to convert flagged pages into high-resolution images buffered in memory.
+- **OCR Pass:** Invoke a configurable OCR engine (initially Tesseract via `pytesseract`) to extract text per page, merging results into the descriptor preview/metadata while capturing confidence metrics.
+- **Caching & Reuse:** Store OCR text alongside the existing classification cache entries to avoid reprocessing unchanged PDFs; leverage document hash to key the cache.
+- **CLI & Config:** Add configuration toggles (`processing.process_pdf_images`, OCR language choices) and surface progress/summary notes so users understand when OCR was applied or skipped.
+- **Testing:** Provide fixtures covering mixed-content PDFs (text + image), true image-only scans, and multi-language documents to ensure detection heuristics and OCR fallbacks behave correctly.
 
 ## Phase 6 – CLI Surface
 

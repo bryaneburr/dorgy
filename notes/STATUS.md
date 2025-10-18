@@ -103,3 +103,8 @@
 - Implemented a DSPy logging filter to drop the structured-output fallback warnings so CLI dry runs stay focused on actionable results.
 - Wired the filter into the classification engine, structure planner, and vision captioner initialization to keep suppression consistent across DSPy entry points.
 - Next actions: monitor upcoming DSPy releases for logging changes and backfill regression coverage if the warning signatures evolve.
+
+## 2025-10-27
+- Hardened `VisionCaptioner` image loading by registering optional Pillow plugins (HEIF/AVIF/JXL) when available and falling back to Pillow conversions when DSPy cannot ingest a file directly.
+- Added PNG conversion via in-memory buffers so HEIC/AVIF/JXL/ICO assets no longer trigger multimodal capability errors during captioning.
+- `uv run pytest` remains green (68 passed, 1 skipped); monitor watch/org runs against HEIC collections to confirm the regression is resolved.
