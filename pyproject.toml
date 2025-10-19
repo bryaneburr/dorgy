@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dorgy"
-version = "0.1.0"
+version = "0.1.1"
 description = "AI-assisted CLI for organizing files."
 readme = "README.md"
 authors = [{ name = "Bryan E. Burr" }]
@@ -25,7 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
-urls = { Homepage = "https://github.com/bryaneburr/dorgie", "Bug Tracker" = "https://github.com/bryaneburr/dorgie/issues", Documentation = "https://github.com/bryaneburr/dorgie#readme" }
+urls = { Homepage = "https://github.com/bryaneburr/dorgy", "Bug Tracker" = "https://github.com/bryaneburr/dorgy/issues", Documentation = "https://github.com/bryaneburr/dorgy#readme" }
 dependencies = [
     "click>=8.0.0",
     "rich>=13.0.0",

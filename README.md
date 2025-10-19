@@ -19,8 +19,8 @@ We are preparing the first PyPI release. Until the package lands on the index, i
 
 ```bash
 # Clone the repository
-git clone https://github.com/bryaneburr/dorgie.git
-cd dorgie
+git clone https://github.com/bryaneburr/dorgy.git
+cd dorgy
 
 # Sync dependencies (includes dev extras)
 uv sync
@@ -130,7 +130,7 @@ For release-specific work, use the branch/review workflow documented above and e
 
 ## Community & Support
 
-- File issues and feature requests at [github.com/bryaneburr/dorgie/issues](https://github.com/bryaneburr/dorgie/issues).
+- File issues and feature requests at [github.com/bryaneburr/dorgy/issues](https://github.com/bryaneburr/dorgy/issues).
 - Join the discussion via GitHub Discussions (coming soon) or reach out through issues for contributor onboarding.
 - If you build automations on top of `dorgy`, let us know—roadmap priorities are community driven.
 
