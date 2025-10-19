@@ -160,6 +160,9 @@ def test_cli_org_renames_files_when_enabled(tmp_path: Path) -> None:
 
     runner = CliRunner()
     env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("organization:\n  rename_files: true\n", encoding="utf-8")
 
     result = runner.invoke(cli, ["org", str(root)], env=env)
 

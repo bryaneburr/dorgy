@@ -879,6 +879,7 @@ def org(
         staging_dir = None if dry_run else state_dir / "staging"
         classification_cache = ClassificationCacheCls(state_dir / "classifications.json")
         vision_captioner: "VisionCaptioner | None" = None
+        vision_warning: str | None = None
         if config.processing.process_images:
             cache_instance = cast("VisionCache", VisionCacheCls(state_dir / "vision.json"))
             cache_instance.load()
@@ -888,7 +889,9 @@ def org(
                     VisionCaptionerCls(config.llm, cache=cache_instance),
                 )
             except RuntimeError as exc:
-                raise click.ClickException(str(exc)) from exc
+                vision_warning = f"Vision captioning disabled: {exc}"
+                LOGGER.warning("%s", vision_warning)
+                vision_captioner = None
 
         pipeline = IngestionPipelineCls(
             scanner=scanner,
@@ -1083,6 +1086,8 @@ def org(
                 destination_map=structure_map,
             )
             plan_task.complete("Operation plan ready")
+            if vision_warning:
+                plan.notes.append(vision_warning)
         rename_map = {operation.source: operation.destination for operation in plan.renames}
         move_map = {operation.source: operation.destination for operation in plan.moves}
 

@@ -132,3 +132,9 @@
 - Release automation now stages and commits `pyproject.toml`/`uv.lock` after version bumps so tagging always lands on a clean tree.
 - Addressed CI-only failure in `test_cli_org_prompt_file_overrides_inline_prompt` by writing a real PNG via Pillow so python-magic detects it as an image across Linux runners.
 - Next actions: surface the Invoke collection in README release guidance and decide whether SPEC Phase 9 should reference the `invoke release` path explicitly.
+
+## 2025-10-31
+- Defaulted `processing.process_images` to true and `organization.rename_files` to false, updating `dorgy.config.models`, module AGENTS guidance, and CLI docs to reflect the new expectations.
+- Softened CLI/watch vision initialization so missing LLM credentials fall back to non-vision runs while surfacing plan notes and warnings for automation.
+- Documented provider-specific LLM setup (OpenAI, Anthropic, xAI, Google Gemini, local gateways) in README to help operators wire credentials via `dorgy config`.
+- Verified rename/vision regression coverage with `uv run pytest tests/test_cli_org.py::test_cli_org_renames_files_when_enabled`; next actions: broaden watch JSON tests to assert the vision-captioning warning note propagates when captioning is auto-disabled.
