@@ -114,3 +114,21 @@
 - Added shared `--prompt-file` support for `dorgy org` and `dorgy watch`, loading UTF-8 instructions via `resolve_prompt_text` so file-based prompts override inline `--prompt` values and flow through JSON payloads.
 - Extended CLI integration tests to cover prompt file precedence for both commands and verified via `uv run pytest tests/test_cli_org.py::test_cli_org_prompt_file_overrides_inline_prompt tests/test_cli_watch.py::test_cli_watch_prompt_file_overrides_inline_prompt`.
 - Updated SPEC usage examples and CLI AGENTS guidance to document the new flag; next actions: monitor prompt-handling feedback and consider exposing prompt templates in config if automation asks for reusable defaults.
+
+## 2025-10-29
+- Spun up `feature/release-prep` for distribution work so metadata and publishing scripts stay isolated from `main`.
+- Polished `pyproject.toml` with author, license, keywords, classifiers, and canonical project URLs to prep PyPI presentation; confirmed packaging still builds locally.
+- Marked Phase 9 \"Distribution & Release Prep\" as in progress inside SPEC to track the new milestone.
+- Next actions: document release expectations in AGENTS, run `uv run pre-commit run --all-files`, and stage TestPyPI dry run instructions.
+- Completed TestPyPI dry run with `uv publish`, confirmed `dorgy` installs from the index, and smoke-tested the CLI (`dorgy --help`) in a clean environment.
+- Next actions: prepare production PyPI token, rerun `uv build`/`uv publish`, tag `v0.1.0`, and merge the release branch once CI is green.
+- Reduced CLI startup latency by deferring heavy imports via module-level lazy loaders, preserving monkeypatch-friendly attributes, and verified the new structure with `uv run pre-commit run --all-files`.
+
+## 2025-10-30
+- Introduced Invoke automation (`tasks.py`) that wraps uv for sync/build/version/publish/test/lint flows so contributors have a consistent entry point for release chores.
+- Added `invoke` to the dev extra, refreshed `uv.lock`, and ran `uv sync --extra dev` so local environments pick up the dependency.
+- Verified availability with `uv run invoke --list`, confirming release/test/ci tasks show up alongside the new helpers.
+- Added git tagging Invoke task (`invoke tag-version`) and extended `invoke release` to support tagging/pushing `v<version>` after publishes.
+- Release automation now stages and commits `pyproject.toml`/`uv.lock` after version bumps so tagging always lands on a clean tree.
+- Addressed CI-only failure in `test_cli_org_prompt_file_overrides_inline_prompt` by writing a real PNG via Pillow so python-magic detects it as an image across Linux runners.
+- Next actions: surface the Invoke collection in README release guidance and decide whether SPEC Phase 9 should reference the `invoke release` path explicitly.

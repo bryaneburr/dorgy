@@ -1,83 +1,148 @@
 ## Dorgy
 
-Dorgy is a Python CLI that will organize your files with AI assistance. The current focus is establishing the project foundations (CLI scaffolding, packaging, automation hooks) before implementing the full pipeline described in `SPEC.md`.
+<img src="images/dorgy.png" height="200">
 
-### Getting Started
+`dorgy` is an AI-assisted command line toolkit that keeps growing collections of files tidy. The project already ships ingestion, classification, organization, watch, search, and undo workflows while we continue to flesh out the roadmap captured in `SPEC.md`.
+
+### Why Dorgy?
+
+- **Hands-off organization** – classify, rename, and relocate files using DSPy-backed language models plus fast heuristic fallbacks.
+- **Continuous monitoring** – watch directories, batch changes, and export machine-readable summaries for downstream automation.
+- **Rich undo and audit history** – track every operation in `.dorgy/` so reorganizations remain reversible.
+- **Extensible foundation** – configuration is declarative, tests are automated via `uv`, and the roadmap is public.
+
+---
+
+## Installation
+
+We are preparing the first PyPI release. Until the package lands on the index, install from source:
 
 ```bash
-# Install dependencies with uv
+# Clone the repository
+git clone https://github.com/bryaneburr/dorgy.git
+cd dorgy
+
+# Sync dependencies (includes dev extras)
 uv sync
 
-# Install pre-commit hooks (one-time)
-uv run pre-commit install
-
-# Inspect the CLI (commands are placeholders for now)
-uv run dorgy --help
-
-# Run lint/format/tests via hooks
-uv run pre-commit run --all-files
-
-# View or modify configuration
-uv run dorgy config view
-uv run dorgy config set llm.temperature --value 0.25
+# Optional: install an editable build
+uv pip install -e .
 ```
 
-### Project Conventions
-
-- Manage work on feature branches (e.g., `feature/phase-0-foundations`) and run `uv run pre-commit run --all-files` before pushing.
-- Track roadmap progress in `SPEC.md` and keep session updates in `notes/STATUS.md`.
-- Use `uv run dorgy <command>` while the CLI lives in this repository; entry points log a placeholder message until later phases implement functionality.
-
-Refer to `AGENTS.md` for automation guidelines and team coordination expectations.
-
-### Current CLI Highlights
+When the `dorgy` package is published to PyPI you will be able to install it directly:
 
 ```bash
-# Organize a directory in place
-uv run dorgy org ./documents
+# Using pip
+pip install dorgy
 
-# Organize into a separate output directory (preserves originals)
-uv run dorgy org ./inbox --output ./organized
-
-# Preview undo information (text or JSON)
-uv run dorgy undo ./documents --dry-run
-uv run dorgy undo ./documents --dry-run --json
-
-# Inspect collection status and recent history
-uv run dorgy status ./documents
-uv run dorgy status ./documents --json
-
-# Search tracked metadata with filters or JSON output
-uv run dorgy search ./documents --name "*.pdf" --limit 10
-uv run dorgy search ./documents --json
-
-# Move or rename tracked files while updating state/history
-uv run dorgy mv ./documents/invoice.pdf ./documents/archive/invoice.pdf
-uv run dorgy mv ./documents/invoice.pdf ./documents/archive/ --conflict-strategy timestamp
-
-# Monitor directories once or continuously
-uv run dorgy watch ./inbox --once
-uv run dorgy watch ./inbox --debounce 1.5 --json
-uv run dorgy watch ./inbox --allow-deletions --json
-
-# Limit output to summary lines or silence non-errors
-uv run dorgy org ./documents --summary
-uv run dorgy status ./documents --quiet
-
-# Emit machine-readable execution payloads
-uv run dorgy org ./documents --json
+# Using uv
+uv pip install dorgy
 ```
 
-### Configuration Notes
+---
 
-- Configuration lives at `~/.dorgy/config.yaml`. Run `uv run dorgy config view` to inspect the effective settings (including environment overrides).
-- Update individual values via `uv run dorgy config set section.key --value <value>` or edit the entire file with `uv run dorgy config edit` (validation runs before saving).
-- Environment variables follow the `DORGY__SECTION__KEY` naming convention and take precedence over file values; CLI-provided overrides always win for a given invocation.
-- Locked/corrupted file handling is governed by `processing.locked_files` and `processing.corrupted_files`; use `copy|skip|wait` or `quarantine|skip` to steer ingestion behaviour.
-- Automatic renaming can be toggled with `organization.rename_files`; set to `false` to keep original filenames while still recording suggestions in state.
-- Classification uses DSPy by default once you configure the `llm` block (provider/model/api_key or api_base_url). Set `DORGY_USE_FALLBACK=1` only if you intentionally want the lightweight heuristic classifier.
-- Organized files are relocated into category folders derived from classification decisions (e.g., `Documents/`); undo data is captured in `.dorgy/last_plan.json` and `dorgy.log`.
-- Use the `cli` section to control verbosity defaults (`quiet_default`, `summary_default`), progress indicators (`progress_enabled`), default search limits (`search_default_limit`), move conflict handling (`move_conflict_strategy`), and the status history limit; environment overrides follow `DORGY__CLI__QUIET_DEFAULT`, etc.
-- Configure watch behaviour under `processing.watch` (debounce, batch sizing, error backoff, `allow_deletions`) to match your filesystem activity profile before running `dorgy watch`. Destructive removals are opt-in—either set `processing.watch.allow_deletions: true` or pass `--allow-deletions`; otherwise removals are suppressed and surfaced in watch notes/JSON, which now include batch `started_at`/`completed_at` timestamps.
-- Control ingestion/classification throughput via `processing.parallel_workers`; increase this value to issue multiple requests in parallel when your provider supports concurrent calls.
-- Enable `processing.process_images` to invoke the DSPy-backed vision captioner. Captions and labels are cached per file hash in `.dorgy/vision.json`, enrich descriptor previews/tags, and flow into both DSPy classification prompts and the heuristic fallback. The configured `llm` provider/model must support multimodal inputs; otherwise the captioner will raise a clear CLI error. Inline prompts supplied via `--prompt` are forwarded to the captioner so image summaries follow the same guidance as text classification.
+## Quickstart
+
+```bash
+# Inspect available commands
+uv run dorgy --help
+
+# Organize a directory in place (dry run first)
+uv run dorgy org ./documents --dry-run
+uv run dorgy org ./documents
+
+# Monitor a directory and emit JSON batches
+uv run dorgy watch ./inbox --json --once
+
+# Undo the latest plan
+uv run dorgy undo ./documents --dry-run
+uv run dorgy status ./documents --json
+```
+
+---
+
+## CLI Highlights
+
+- **`dorgy org`** – batch ingest files, classify them, and apply structured moves with progress bars, summary/quiet toggles, and JSON payloads.
+- **`dorgy watch`** – reuse the same pipeline in a long-running service; guard destructive deletions behind `--allow-deletions`.
+- **`dorgy mv`** – move or rename tracked files while preserving state history.
+- **`dorgy status` / `dorgy undo`** – inspect prior plans, audit history, and restore collections when needed.
+- **Configuration commands** – `dorgy config view|set|edit` expose the full settings model.
+
+All commands accept `--json` for machine-readable output and share standardized error payloads so automation can script around them.
+
+---
+
+## Configuration Essentials
+
+- The primary config file lives at `~/.dorgy/config.yaml`; environment variables follow `DORGY__SECTION__KEY`.
+- `processing` governs ingestion behaviour (batch sizes, captioning, concurrency, size limits). Enable `processing.process_images` to capture multimodal captions stored in `.dorgy/vision.json`.
+- `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation.
+- `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (future releases will also surface search defaults).
+- Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
+- DSPy providers are configured through the `llm` block. Set `DORGY_USE_FALLBACK=1` to force the heuristic classifier during local testing.
+
+---
+
+## Release Workflow (In Flight)
+
+1. Bump the version in `pyproject.toml`, commit outstanding changes, and run `uv run pre-commit run --all-files`.
+2. Stage a TestPyPI dry run using a scoped token:
+   ```bash
+   export PYPI_TOKEN="pypi-AgEN..."
+   uv publish --index-url https://test.pypi.org/legacy/ --token "$PYPI_TOKEN"
+   ```
+3. Validate the wheel from a clean virtual environment:
+   ```bash
+   uv pip install --index-url https://test.pypi.org/simple \
+                  --extra-index-url https://pypi.org/simple dorgy==<version>
+   dorgy --help
+   ```
+4. Publish to PyPI with the production token, tag the release (`git tag v<version>`), and update `SPEC.md` plus `notes/STATUS.md`.
+5. Open a PR from `feature/release-prep` and merge after CI passes and the tag is confirmed.
+
+---
+
+## Roadmap
+
+- `SPEC.md` tracks implementation phases and current status (Phase 9 – Distribution & Release Prep is underway; Phase 7 search/indexing work is queued next).
+- `notes/STATUS.md` logs day-to-day progress, blockers, and next actions.
+- Module-specific coordination details live in `src/dorgy/**/AGENTS.md`.
+
+Upcoming milestones include vision-enriched classification refinements, enhanced CLI ergonomics, and expanded search/indexing APIs.
+
+---
+
+## Contributing
+
+We welcome issues and pull requests while the project matures. A few guidelines keep things predictable:
+
+- **Environment** – install dependencies with `uv sync` and run commands via `uv run ...`.
+- **Pre-commit** – install hooks (`uv run pre-commit install`) and run `uv run pre-commit run --all-files` before pushing.
+- **Branching** – create feature branches named `feature/<scope>` and keep them rebased until ready for review.
+- **Testing** – the default pre-commit stack runs Ruff (lint/format/imports), MyPy, and `uv run pytest`.
+- **Documentation** – follow Google-style docstrings and update relevant `AGENTS.md` files when adding automation-facing behaviours or integrations.
+- **Coordination** – flag changes that impact the CLI contract, watch automation, or external integrations directly in the associated module `AGENTS.md`.
+
+For release-specific work, use the branch/review workflow documented above and ensure TestPyPI validation is complete before tagging.
+
+---
+
+## Community & Support
+
+- File issues and feature requests at [github.com/bryaneburr/dorgy/issues](https://github.com/bryaneburr/dorgy/issues).
+- Join the discussion via GitHub Discussions (coming soon) or reach out through issues for contributor onboarding.
+- If you build automations on top of `dorgy`, let us know—roadmap priorities are community driven.
+
+---
+
+## Authors
+
+- **[Codex](openai.com/codex) (ChatGPT-5 based agent)** – primary implementation and tactical design across ingestion, classification, organization, and tooling.
+- **Bryan E. Burr ([@bryaneburr](github.com/bryaneburr))** – supervisor, editor, and maintainer steering project direction and release planning.
+
+---
+
+## License
+
+Released under the MIT License. See `LICENSE` for details.

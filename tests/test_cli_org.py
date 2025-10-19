@@ -243,7 +243,7 @@ def test_cli_org_prompt_file_overrides_inline_prompt(
 
     root = tmp_path / "prompt-file"
     root.mkdir()
-    (root / "invoice.png").write_text("binarydata", encoding="utf-8")
+    Image.new("RGB", (32, 32), color="white").save(root / "invoice.png")
 
     prompt_file = tmp_path / "instructions.txt"
     prompt_content = "Line one\nLine two with detail"

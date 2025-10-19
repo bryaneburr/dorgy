@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import importlib
 import json
 import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, cast
 
 import click
 import yaml
@@ -26,8 +27,6 @@ from rich.progress import (
 from rich.syntax import Syntax
 from rich.table import Table
 
-from dorgy.classification import ClassificationCache, VisionCache, VisionCaptioner
-from dorgy.classification.structure import StructurePlanner
 from dorgy.cli_options import (
     ModeResolution,
     dry_run_option,
@@ -40,33 +39,66 @@ from dorgy.cli_options import (
     resolve_mode_settings,
     summary_option,
 )
-from dorgy.cli_support import (
-    build_original_snapshot,
-    collect_error_payload,
-    compute_org_counts,
-    descriptor_to_record,
-    relative_to_collection,
-    resolve_prompt_text,
-    run_classification,
-    zip_decisions,
-)
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
-from dorgy.ingestion import FileDescriptor, IngestionPipeline
-from dorgy.ingestion.detectors import HashComputer, TypeDetector
-from dorgy.ingestion.discovery import DirectoryScanner
-from dorgy.ingestion.extractors import MetadataExtractor
-from dorgy.organization.executor import OperationExecutor
-from dorgy.organization.models import MoveOperation, OperationPlan
-from dorgy.organization.planner import OrganizerPlanner
-from dorgy.state import (
-    CollectionState,
-    FileRecord,
-    MissingStateError,
-    OperationEvent,
-    StateError,
-    StateRepository,
-)
-from dorgy.watch import WatchBatchResult, WatchService
+
+if TYPE_CHECKING:
+    from dorgy.classification import VisionCache, VisionCaptioner
+    from dorgy.ingestion import FileDescriptor
+    from dorgy.state import (
+        CollectionState,
+        FileRecord,
+        OperationEvent,
+    )
+    from dorgy.watch import WatchBatchResult
+
+_LAZY_ATTRS: dict[str, tuple[str, str]] = {
+    "ClassificationCache": ("dorgy.classification", "ClassificationCache"),
+    "VisionCache": ("dorgy.classification", "VisionCache"),
+    "VisionCaptioner": ("dorgy.classification", "VisionCaptioner"),
+    "StructurePlanner": ("dorgy.classification.structure", "StructurePlanner"),
+    "FileDescriptor": ("dorgy.ingestion", "FileDescriptor"),
+    "IngestionPipeline": ("dorgy.ingestion", "IngestionPipeline"),
+    "HashComputer": ("dorgy.ingestion.detectors", "HashComputer"),
+    "TypeDetector": ("dorgy.ingestion.detectors", "TypeDetector"),
+    "DirectoryScanner": ("dorgy.ingestion.discovery", "DirectoryScanner"),
+    "MetadataExtractor": ("dorgy.ingestion.extractors", "MetadataExtractor"),
+    "OperationExecutor": ("dorgy.organization.executor", "OperationExecutor"),
+    "MoveOperation": ("dorgy.organization.models", "MoveOperation"),
+    "OperationPlan": ("dorgy.organization.models", "OperationPlan"),
+    "OrganizerPlanner": ("dorgy.organization.planner", "OrganizerPlanner"),
+    "CollectionState": ("dorgy.state", "CollectionState"),
+    "FileRecord": ("dorgy.state", "FileRecord"),
+    "MissingStateError": ("dorgy.state", "MissingStateError"),
+    "OperationEvent": ("dorgy.state", "OperationEvent"),
+    "StateError": ("dorgy.state", "StateError"),
+    "StateRepository": ("dorgy.state", "StateRepository"),
+    "WatchBatchResult": ("dorgy.watch", "WatchBatchResult"),
+    "WatchService": ("dorgy.watch", "WatchService"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose heavy dependencies while keeping CLI import fast."""
+
+    if name in _LAZY_ATTRS:
+        module_name, attr_name = _LAZY_ATTRS[name]
+        module = importlib.import_module(module_name)
+        value = getattr(module, attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _load_dependency(name: str, module: str, attr: str) -> Any:
+    """Return a dependency, respecting any monkeypatch overrides."""
+
+    if name in globals():
+        return globals()[name]
+    module_obj = importlib.import_module(module)
+    value = getattr(module_obj, attr)
+    globals()[name] = value
+    return value
+
 
 console = Console()
 LOGGER = logging.getLogger(__name__)
@@ -578,6 +610,8 @@ def _detect_collection_root(path: Path) -> Path:
         MissingStateError: If the path does not belong to a managed collection.
     """
 
+    from dorgy.state import MissingStateError
+
     candidate = path if path.is_dir() else path.parent
     for current in [candidate, *candidate.parents]:
         state_path = current / ".dorgy" / "state.json"
@@ -664,6 +698,8 @@ def _plan_state_changes(
         click.ClickException: If the source is not tracked in the collection.
     """
 
+    from dorgy.cli_support import relative_to_collection
+
     source_rel = _normalise_state_key(relative_to_collection(source, root))
     dest_rel = _normalise_state_key(relative_to_collection(destination, root))
     mappings: list[tuple[str, str]] = []
@@ -747,6 +783,48 @@ def org(
 ) -> None:
     """Organize files rooted at PATH using the configured ingestion pipeline."""
 
+    from dorgy.cli_support import (
+        build_original_snapshot,
+        collect_error_payload,
+        compute_org_counts,
+        descriptor_to_record,
+        relative_to_collection,
+        resolve_prompt_text,
+        run_classification,
+        zip_decisions,
+    )
+
+    ClassificationCacheCls = _load_dependency(
+        "ClassificationCache", "dorgy.classification", "ClassificationCache"
+    )
+    VisionCacheCls = _load_dependency("VisionCache", "dorgy.classification", "VisionCache")
+    VisionCaptionerCls = _load_dependency(
+        "VisionCaptioner", "dorgy.classification", "VisionCaptioner"
+    )
+    StructurePlannerCls = _load_dependency(
+        "StructurePlanner", "dorgy.classification.structure", "StructurePlanner"
+    )
+    IngestionPipelineCls = _load_dependency(
+        "IngestionPipeline", "dorgy.ingestion", "IngestionPipeline"
+    )
+    HashComputerCls = _load_dependency("HashComputer", "dorgy.ingestion.detectors", "HashComputer")
+    TypeDetectorCls = _load_dependency("TypeDetector", "dorgy.ingestion.detectors", "TypeDetector")
+    DirectoryScannerCls = _load_dependency(
+        "DirectoryScanner", "dorgy.ingestion.discovery", "DirectoryScanner"
+    )
+    MetadataExtractorCls = _load_dependency(
+        "MetadataExtractor", "dorgy.ingestion.extractors", "MetadataExtractor"
+    )
+    OperationExecutorCls = _load_dependency(
+        "OperationExecutor", "dorgy.organization.executor", "OperationExecutor"
+    )
+    OrganizerPlannerCls = _load_dependency(
+        "OrganizerPlanner", "dorgy.organization.planner", "OrganizerPlanner"
+    )
+    CollectionStateCls = _load_dependency("CollectionState", "dorgy.state", "CollectionState")
+    StateRepositoryCls = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
+    MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+
     json_enabled = json_output
     try:
         prompt = resolve_prompt_text(prompt, prompt_file)
@@ -791,7 +869,7 @@ def org(
         if config.processing.max_file_size_mb > 0:
             max_size_bytes = config.processing.max_file_size_mb * 1024 * 1024
 
-        scanner = DirectoryScanner(
+        scanner = DirectoryScannerCls(
             recursive=recursive,
             include_hidden=include_hidden,
             follow_symlinks=follow_symlinks,
@@ -799,29 +877,31 @@ def org(
         )
         state_dir = target_root / ".dorgy"
         staging_dir = None if dry_run else state_dir / "staging"
-        classification_cache = ClassificationCache(state_dir / "classifications.json")
-        vision_cache: VisionCache | None = None
-        vision_captioner: VisionCaptioner | None = None
+        classification_cache = ClassificationCacheCls(state_dir / "classifications.json")
+        vision_captioner: "VisionCaptioner | None" = None
         if config.processing.process_images:
-            vision_cache = VisionCache(state_dir / "vision.json")
-            vision_cache.load()
+            cache_instance = cast("VisionCache", VisionCacheCls(state_dir / "vision.json"))
+            cache_instance.load()
             try:
-                vision_captioner = VisionCaptioner(config.llm, cache=vision_cache)
+                vision_captioner = cast(
+                    "VisionCaptioner",
+                    VisionCaptionerCls(config.llm, cache=cache_instance),
+                )
             except RuntimeError as exc:
                 raise click.ClickException(str(exc)) from exc
 
-        pipeline = IngestionPipeline(
+        pipeline = IngestionPipelineCls(
             scanner=scanner,
-            detector=TypeDetector(),
-            hasher=HashComputer(),
-            extractor=MetadataExtractor(),
+            detector=TypeDetectorCls(),
+            hasher=HashComputerCls(),
+            extractor=MetadataExtractorCls(),
             processing=config.processing,
             staging_dir=staging_dir,
             allow_writes=not dry_run,
             vision_captioner=vision_captioner,
         )
 
-        planner = OrganizerPlanner()
+        planner = OrganizerPlannerCls()
         parallel_workers = max(1, config.processing.parallel_workers)
 
         with _ProgressScope(progress_enabled) as progress:
@@ -978,7 +1058,7 @@ def org(
                 )
             if descriptor_list:
                 try:
-                    structure_planner = StructurePlanner(config.llm)
+                    structure_planner = StructurePlannerCls(config.llm)
                     structure_map = structure_planner.propose(
                         descriptor_list,
                         decision_list,
@@ -1211,7 +1291,7 @@ def org(
                 )
             return
 
-        repository = StateRepository()
+        repository = StateRepositoryCls()
         state_dir = repository.initialize(target_root)
         quarantine_dir = state_dir / "quarantine"
         if result.quarantined and config.processing.corrupted_files.action == "quarantine":
@@ -1245,7 +1325,7 @@ def org(
         try:
             state = repository.load(target_root)
         except MissingStateError:
-            state = CollectionState(root=str(target_root))
+            state = CollectionStateCls(root=str(target_root))
 
         snapshot: dict[str, Any] | None = None
         if not dry_run:
@@ -1253,7 +1333,7 @@ def org(
                 [descriptor for _, descriptor in paired], source_root
             )
 
-        executor = OperationExecutor(
+        executor = OperationExecutorCls(
             staging_root=state_dir / "staging",
             copy_mode=copy_mode,
             source_root=source_root,
@@ -1416,6 +1496,10 @@ def watch(
     once: bool,
 ) -> None:
     """Continuously monitor PATHS and organize changes as they arrive."""
+
+    from dorgy.cli_support import resolve_prompt_text
+
+    WatchService = _load_dependency("WatchService", "dorgy.watch", "WatchService")
 
     if not paths:
         raise click.ClickException("Provide at least one PATH to monitor.")
@@ -1708,6 +1792,9 @@ def search(
 ) -> None:
     """Search within an organized collection's state metadata."""
 
+    StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
+    MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+
     json_enabled = json_output
     try:
         manager = ConfigManager()
@@ -1954,6 +2041,16 @@ def mv(
     quiet: bool,
 ) -> None:
     """Move or rename tracked files within an organized collection."""
+
+    from dorgy.cli_support import relative_to_collection
+
+    OperationExecutor = _load_dependency(
+        "OperationExecutor", "dorgy.organization.executor", "OperationExecutor"
+    )
+    OperationPlan = _load_dependency("OperationPlan", "dorgy.organization.models", "OperationPlan")
+    MoveOperation = _load_dependency("MoveOperation", "dorgy.organization.models", "MoveOperation")
+    StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
+    MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
 
     json_enabled = json_output
     try:
@@ -2221,6 +2318,10 @@ def status(
 ) -> None:
     """Display a summary of the collection state for PATH."""
 
+    StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
+    MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    StateError = _load_dependency("StateError", "dorgy.state", "StateError")
+
     json_enabled = json_output
     try:
         manager = ConfigManager()
@@ -2480,6 +2581,13 @@ def undo(
     quiet: bool,
 ) -> None:
     """Rollback the last organization plan applied to PATH."""
+
+    OperationExecutor = _load_dependency(
+        "OperationExecutor", "dorgy.organization.executor", "OperationExecutor"
+    )
+    StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
+    MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    StateError = _load_dependency("StateError", "dorgy.state", "StateError")
 
     json_enabled = json_output
     try:

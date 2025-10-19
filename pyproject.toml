@@ -4,10 +4,28 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dorgy"
-version = "0.1.0"
+version = "0.1.3"
 description = "AI-assisted CLI for organizing files."
 readme = "README.md"
+authors = [{ name = "Bryan E. Burr" }]
+license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.13"
+keywords = ["cli", "automation", "productivity", "document organization", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Utilities",
+    "Topic :: Office/Business",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+urls = { Homepage = "https://github.com/bryaneburr/dorgy", "Bug Tracker" = "https://github.com/bryaneburr/dorgy/issues", Documentation = "https://github.com/bryaneburr/dorgy#readme" }
 dependencies = [
     "click>=8.0.0",
     "rich>=13.0.0",
@@ -33,6 +51,7 @@ dev = [
     "ruff>=0.6.0",
     "mypy>=1.9.0",
     "types-PyYAML>=6.0.12.20240917",
+    "invoke>=2.2.0",
 ]
 
 [project.scripts]
@@ -59,3 +78,9 @@ strict_optional = true
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
