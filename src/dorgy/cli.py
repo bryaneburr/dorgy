@@ -33,6 +33,7 @@ from dorgy.cli_options import (
     dry_run_option,
     json_option,
     output_option,
+    prompt_file_option,
     prompt_option,
     quiet_option,
     recursive_option,
@@ -45,6 +46,7 @@ from dorgy.cli_support import (
     compute_org_counts,
     descriptor_to_record,
     relative_to_collection,
+    resolve_prompt_text,
     run_classification,
     zip_decisions,
 )
@@ -723,6 +725,7 @@ def cli() -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 @recursive_option("Include all subdirectories.")
+@prompt_file_option("Read extra organization instructions from a file.")
 @prompt_option("Provide extra instructions for organization.")
 @output_option("Directory for organized files.")
 @dry_run_option("Preview changes without modifying files.")
@@ -735,6 +738,7 @@ def org(
     path: str,
     recursive: bool,
     prompt: str | None,
+    prompt_file: str | None,
     output: str | None,
     dry_run: bool,
     json_output: bool,
@@ -744,6 +748,10 @@ def org(
     """Organize files rooted at PATH using the configured ingestion pipeline."""
 
     json_enabled = json_output
+    try:
+        prompt = resolve_prompt_text(prompt, prompt_file)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"Failed to read prompt file {prompt_file}: {exc}") from exc
     try:
         manager = ConfigManager()
         manager.ensure_exists()
@@ -1377,6 +1385,7 @@ def org(
 @cli.command()
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, file_okay=False, path_type=str))
 @recursive_option("Include subdirectories for monitoring.")
+@prompt_file_option("Read extra classification guidance from a file.")
 @prompt_option("Provide extra classification guidance.")
 @output_option("Destination root when copying organized files.")
 @dry_run_option("Preview actions without mutating files.")
@@ -1396,6 +1405,7 @@ def watch(
     paths: tuple[str, ...],
     recursive: bool,
     prompt: str | None,
+    prompt_file: str | None,
     output: str | None,
     dry_run: bool,
     debounce: float | None,
@@ -1409,6 +1419,11 @@ def watch(
 
     if not paths:
         raise click.ClickException("Provide at least one PATH to monitor.")
+
+    try:
+        prompt = resolve_prompt_text(prompt, prompt_file)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(f"Failed to read prompt file {prompt_file}: {exc}") from exc
 
     try:
         manager = ConfigManager()
