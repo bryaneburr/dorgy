@@ -108,13 +108,13 @@ llm:
 
 # Processing Options
 processing:
-  use_vision_models: false
+  process_images: false
   process_audio: false
   follow_symlinks: false
   process_hidden_files: false
   max_file_size_mb: 100  # Sample files larger than this
   sample_size_mb: 10     # Size of sample for large files
-  
+
   # Locked file handling
   locked_files:
     action: "copy"  # copy, skip, wait
@@ -309,6 +309,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
 | [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
+| [ ] | Phase 5.8 – Vision-Enriched Classification | Leverage `processing.process_images` to capture captions/tags, enrich descriptors with image summaries, extend classifier/tests/docs |
 | [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [~] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
@@ -456,6 +457,41 @@ The project will progress through the following phases. Update the status column
 - `OperationPlan` and history logging include `DeleteOperation` entries with removal `kind` metadata; state repositories remove tracked files, append history, and write watch logs with deletion metrics when opt-in is enabled.
 - CLI summaries/JSON payloads expose `deleted` counts, executed removal metadata (`removals`), and suppression details (`suppressed_deletions`), with summary helpers highlighting destructive actions.
 - Added tests cover suppressed deletions, allowed deletions, internal moves, and external moves to confirm state persistence, history logging, and JSON surfaced details.
+
+## Phase 5.8 – Vision-Enriched Classification
+
+- `processing.process_images` enables multimodal captioning that generates textual descriptions, key entities, and confidence scores for images and other visual assets; descriptors carry these summaries so DSPy receives meaningful context.
+- Captioning output is captured by a DSPy program that uses `dspy.Image` inputs with the configured LLM; results are stored alongside existing classification cache metadata and reused by ingest/watch pipelines.
+- Classifier heuristics fall back to the captions/tags when DSPy is disabled, while CLI/JSON outputs expose the captured vision metadata for automation.
+- Optional Pillow plugins (e.g., `pillow-heif`, `pillow-avif-plugin`, `pillow-avif`, `pillow-jxl`, `pillow-jxl-plugin`) are auto-registered when present so HEIC/AVIF/JPEG XL assets flow through the captioner without additional configuration.
+
+### Goals
+- Reuse the configured `llm` provider/model for captioning when `process_images` is true by invoking a dedicated DSPy signature that accepts `dspy.Image` inputs; surface clear errors when the model lacks vision capabilities.
+- Extend ingestion to request captions when `process_images` is true, normalize summaries/labels into descriptors (`preview`, `metadata["vision_caption"]`, `tags`), and persist them in the classification cache for reuse.
+- Thread user-provided prompts into caption requests so image summaries respect the same context as text classification.
+- Update classification/organization flows to consume the enriched metadata, adjusting prompts (DSPy) and heuristics so images can be categorized beyond MIME types.
+- Document configuration expectations (model requirements, error messaging) in SPEC, AGENTS, and CLI help.
+
+### Deliverables
+- `VisionCaptioner` DSPy module that wraps the existing LLM configuration, honors user prompts, and includes a caching strategy plus integration tests covering happy-path captions and failure fallback.
+- Updated ingestion metadata extractor and classification cache schema supporting vision payloads plus migration handling for existing cache entries.
+- Expanded classification engine tests ensuring DSPy payloads contain caption/text pairs, along with fixtures verifying heuristic improvements.
+- CLI JSON payloads (`org`, `watch`) now emit a `vision` object per file when captions are available, and SPEC/AGENTS documentation captures the new automation hooks.
+- Collection state records persist caption metadata (`vision_caption`, `vision_labels`, `vision_confidence`, `vision_reasoning`) so downstream history/export tooling retains image context.
+- Image loading fallbacks rely on Pillow to convert unsupported formats to PNG before invoking DSPy, ensuring HEIC/AVIF/JXL/ICO/BMP assets participate in captioning when the relevant plugins are installed.
+
+### Risks & Mitigations
+- **Latency/Cost:** Run captioning asynchronously with retry/backoff and enforce per-run limits; provide CLI notes when captions are skipped due to provider errors.
+- **Provider Drift:** Encapsulate provider-specific prompts/response parsing in adapters with unit tests; surface informative errors when API capabilities are missing.
+- **Privacy/Security:** Honour `processing.process_images` or CLI flags to opt out per-run and log when files are skipped to aid auditing.
+
+### Future Work – Image-only PDF OCR Plan
+- **Detection:** Augment the ingestion pipeline to flag PDFs whose pages lack textual content after Docling extraction, treating them as image-only candidates.
+- **Rendering:** Use a headless renderer (`pdf2image`, Poppler bindings, or Docling page rasterisation) to convert flagged pages into high-resolution images buffered in memory.
+- **OCR Pass:** Invoke a configurable OCR engine (initially Tesseract via `pytesseract`) to extract text per page, merging results into the descriptor preview/metadata while capturing confidence metrics.
+- **Caching & Reuse:** Store OCR text alongside the existing classification cache entries to avoid reprocessing unchanged PDFs; leverage document hash to key the cache.
+- **CLI & Config:** Add configuration toggles (`processing.process_pdf_images`, OCR language choices) and surface progress/summary notes so users understand when OCR was applied or skipped.
+- **Testing:** Provide fixtures covering mixed-content PDFs (text + image), true image-only scans, and multi-language documents to ensure detection heuristics and OCR fallbacks behave correctly.
 
 ## Phase 6 – CLI Surface
 

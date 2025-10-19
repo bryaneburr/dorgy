@@ -37,7 +37,7 @@ class ProcessingOptions(DorgyBaseModel):
     """Processing options governing ingestion behavior.
 
     Attributes:
-        use_vision_models: Whether to enable vision-based classification.
+        process_images: Whether to enable image captioning/classification.
         process_audio: Whether to process audio files.
         follow_symlinks: Whether to traverse symbolic links.
         process_hidden_files: Whether hidden files should be included.
@@ -51,7 +51,10 @@ class ProcessingOptions(DorgyBaseModel):
             and classification tasks.
     """
 
-    use_vision_models: bool = False
+    process_images: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("process_images", "use_vision_models"),
+    )
     process_audio: bool = False
     follow_symlinks: bool = False
     process_hidden_files: bool = False

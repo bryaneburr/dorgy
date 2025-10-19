@@ -13,6 +13,7 @@ try:  # pragma: no cover - optional dependency
 except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
+from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.classification.models import ClassificationDecision
 from dorgy.config.models import LLMSettings
 from dorgy.ingestion.models import FileDescriptor
@@ -23,9 +24,9 @@ LOGGER = logging.getLogger(__name__)
 class FileTreeSignature(dspy.Signature):  # type: ignore[misc]
     """DSPy signature that requests a destination tree proposal."""
 
-    files_json = dspy.InputField()
-    goal = dspy.InputField()
-    tree_json = dspy.OutputField()
+    files_json: str = dspy.InputField()
+    goal: str = dspy.InputField()
+    tree_json: str = dspy.OutputField()
 
 
 class StructurePlanner:
@@ -37,6 +38,7 @@ class StructurePlanner:
         self._enabled = not use_fallback and dspy is not None
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
         if self._enabled:
+            configure_dspy_logging()
             self._configure_language_model()
             self._program = dspy.Predict(FileTreeSignature)
             LOGGER.debug(
@@ -164,7 +166,10 @@ class StructurePlanner:
             'shape {"files": [{"source": "<original relative path>", "destination": '
             '"<relative destination path>"}]}. Do not include absolute paths or drive letters. '
             "Destinations must keep the original filename extension exactly once. Use hyphenated "
-            "folder names and avoid extremely long directory chains."
+            "folder names and avoid extremely long directory chains. Prefer placing files inside "
+            "meaningful directories instead of leaving them at the root; create subfolders when it "
+            "helps keep related items together, and only leave a file at the top level if no "
+            "sensible grouping exists."
         )
 
         try:

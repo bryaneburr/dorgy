@@ -7,7 +7,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, Tuple
+
+if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+    from dorgy.classification.vision import VisionCaptioner
 
 from dorgy.config.models import ProcessingOptions
 
@@ -29,6 +32,7 @@ class IngestionPipeline:
         processing: ProcessingOptions,
         staging_dir: Path | None = None,
         allow_writes: bool = True,
+        vision_captioner: "VisionCaptioner" | None = None,
     ) -> None:
         """Initialize the ingestion pipeline with collaborator instances.
 
@@ -48,11 +52,14 @@ class IngestionPipeline:
         self.processing = processing
         self.staging_dir = staging_dir
         self.allow_writes = allow_writes
+        self.vision_captioner = vision_captioner
 
     def run(
         self,
         roots: Iterable[Path],
         on_stage: Callable[[str, Path, Dict[str, Any] | None], None] | None = None,
+        *,
+        prompt: str | None = None,
     ) -> IngestionResult:
         """Process one or more roots and return aggregated results.
 
@@ -60,6 +67,7 @@ class IngestionPipeline:
             roots: Iterable of directory roots to ingest.
             on_stage: Optional callback invoked as files progress through the pipeline.
                 The callback receives a stage identifier and the associated file path.
+            prompt: Optional user-provided instruction that should influence captioning.
 
         Returns:
             IngestionResult: Aggregate of processed descriptors and status.
@@ -169,6 +177,43 @@ class IngestionPipeline:
                     )
                     preview = self.extractor.preview(process_path, mime, sample_limit)
 
+                    tags: list[str] = [category] if category and category != "unknown" else []
+
+                    vision_result = None
+                    if (
+                        self.processing.process_images
+                        and self.vision_captioner is not None
+                        and mime.startswith("image/")
+                    ):
+                        try:
+                            vision_result = self.vision_captioner.caption(
+                                process_path,
+                                cache_key=file_hash,
+                                prompt=prompt,
+                            )
+                        except RuntimeError as vision_error:
+                            metadata.setdefault("vision_error", str(vision_error))
+                            local_result.errors.append(f"{pending.path}: {vision_error}")
+                        else:
+                            if vision_result is not None:
+                                if not preview:
+                                    preview = vision_result.caption
+                                metadata["vision_caption"] = vision_result.caption
+                                if vision_result.labels:
+                                    metadata["vision_labels"] = ", ".join(vision_result.labels)
+                                    for label in vision_result.labels:
+                                        if label not in tags:
+                                            tags.append(label)
+                                if vision_result.confidence is not None:
+                                    metadata["vision_confidence"] = (
+                                        f"{vision_result.confidence:.3f}"
+                                    )
+                                if vision_result.reasoning:
+                                    metadata["vision_reasoning"] = vision_result.reasoning
+
+                    if not tags and category and category != "unknown":
+                        tags = [category]
+
                     descriptor = FileDescriptor(
                         path=pending.path,
                         display_name=pending.path.name,
@@ -176,7 +221,7 @@ class IngestionPipeline:
                         hash=file_hash,
                         preview=preview,
                         metadata=metadata,
-                        tags=[category] if category and category != "unknown" else [],
+                        tags=tags,
                         needs_review=needs_review,
                     )
                     local_result.processed.append(descriptor)
