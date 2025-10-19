@@ -21,7 +21,19 @@
 
 ## Installation
 
-We are preparing the first PyPI release. Until the package lands on the index, install from source:
+### PyPI (recommended)
+
+```bash
+# Using pip
+pip install dorgy
+
+# Using uv
+uv pip install dorgy
+```
+
+### From source
+
+Clone the repository when you plan to contribute or work off the bleeding edge:
 
 ```bash
 # Clone the repository
@@ -33,16 +45,6 @@ uv sync
 
 # Optional: install an editable build
 uv pip install -e .
-```
-
-When the `dorgy` package is published to PyPI you will be able to install it directly:
-
-```bash
-# Using pip
-pip install dorgy
-
-# Using uv
-uv pip install dorgy
 ```
 
 ---
@@ -90,22 +92,34 @@ All commands accept `--json` for machine-readable output and share standardized 
 
 ---
 
-## Release Workflow (In Flight)
+## Automation & Release Tasks
 
-1. Bump the version in `pyproject.toml`, commit outstanding changes, and run `uv run pre-commit run --all-files`.
-2. Stage a TestPyPI dry run using a scoped token:
+We ship an Invoke task collection that wraps the `uv` toolchain so day-to-day automation stays consistent:
+
+- `uv run invoke sync` – install dependencies (dev extras by default).
+- `uv run invoke tests` / `uv run invoke lint` / `uv run invoke ci` – mirror the CI workflow locally.
+- `uv run invoke release` – bump the version, commit `pyproject.toml`/`uv.lock`, rebuild artifacts, publish, and tag.
+- `uv run invoke release --dry-run --push-tag` – preview the full release plan without modifying anything.
+- `uv run invoke tag-version` – create (and optionally push) an annotated git tag.
+
+### Release Workflow
+
+1. Ensure the working tree is clean and CI passes locally:
+   ```bash
+   uv run invoke ci
+   ```
+2. Perform a dry run when validating credentials or reviewing the plan:
+   ```bash
+   uv run invoke release --dry-run --push-tag --token "$TEST_PYPI_TOKEN" \
+       --index-url https://test.pypi.org/legacy/ --skip-existing
+   ```
+3. Publish to PyPI (commits the version bump, pushes the tag when requested):
    ```bash
    export PYPI_TOKEN="pypi-AgEN..."
-   uv publish --index-url https://test.pypi.org/legacy/ --token "$PYPI_TOKEN"
+   uv run invoke release --push-tag --token "$PYPI_TOKEN"
    ```
-3. Validate the wheel from a clean virtual environment:
-   ```bash
-   uv pip install --index-url https://test.pypi.org/simple \
-                  --extra-index-url https://pypi.org/simple dorgy==<version>
-   dorgy --help
-   ```
-4. Publish to PyPI with the production token, tag the release (`git tag v<version>`), and update `SPEC.md` plus `notes/STATUS.md`.
-5. Open a PR from `feature/release-prep` and merge after CI passes and the tag is confirmed.
+   Use `--index-url`/`--skip-existing` for TestPyPI dry runs, or `--tag-prefix ""` if you prefer unprefixed tags.
+4. Update `SPEC.md`/`notes/STATUS.md` with release notes, open a PR from `feature/release-prep`, and merge once GitHub Actions succeeds.
 
 ---
 
