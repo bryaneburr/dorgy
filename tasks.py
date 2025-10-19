@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from invoke import Collection, Context, task
+from invoke.runners import Result
 
 PROJECT_ROOT = Path(__file__).parent
 DIST_DIR = PROJECT_ROOT / "dist"
@@ -25,7 +26,7 @@ def _run_uv(
     echo: bool = True,
     dry_run: bool = False,
     env: Mapping[str, str] | None = None,
-) -> None:
+) -> Result | None:
     """Execute a uv command with consistent quoting, logging, and PTY defaults.
 
     Args:
@@ -38,11 +39,29 @@ def _run_uv(
     command = shlex.join(("uv", *args))
     if dry_run:
         print(f"[dry-run] {command}")
-        return
+        return None
     run_env = dict(ctx.config.run.env or {})
     if env:
         run_env.update(env)
-    ctx.run(command, echo=echo, pty=True, env=run_env)
+    return ctx.run(command, echo=echo, pty=True, env=run_env)
+
+
+def _get_current_version(ctx: Context) -> str:
+    """Return the project version reported by `uv version --short`."""
+
+    result = ctx.run("uv version --short", hide=True, pty=False)
+    return result.stdout.strip()
+
+
+def _predict_bumped_version(ctx: Context, part: str) -> str:
+    """Return the version that would result from bumping the given semantic part."""
+
+    result = ctx.run(
+        f"uv version --bump {shlex.quote(part)} --dry-run --short",
+        hide=True,
+        pty=False,
+    )
+    return result.stdout.strip()
 
 
 @task
@@ -143,11 +162,84 @@ def publish(
 
 @task(
     help={
+        "version": "Version string to tag (defaults to the project version).",
+        "prefix": "Prefix to prepend to the git tag (defaults to 'v').",
+        "message": "Annotated tag message (defaults to 'Release <tag>').",
+        "push": "Push the created tag to origin after creation.",
+        "force": "Replace an existing tag with the same name.",
+        "dry_run": "Print git commands without executing them.",
+    }
+)
+def tag_version(
+    ctx: Context,
+    version: str | None = None,
+    prefix: str = "v",
+    message: str | None = None,
+    push: bool = False,
+    force: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Create and optionally push a git tag for the current project version.
+
+    Args:
+        ctx: Invoke execution context.
+        version: Explicit version identifier to tag.
+        prefix: Optional prefix (e.g., ``v``) to prepend to the tag name.
+        message: Annotated tag message.
+        push: Push the created tag to ``origin`` when True.
+        force: Overwrite an existing tag with the same name.
+        dry_run: Log git commands without executing them.
+
+    Raises:
+        RuntimeError: If the tag already exists and ``force`` is False.
+    """
+
+    resolved_version = version or _get_current_version(ctx)
+    tag_name = f"{prefix}{resolved_version}" if prefix else resolved_version
+    tag_message = message or f"Release {tag_name}"
+
+    if dry_run:
+        force_flag = " -f" if force else ""
+        cmd_preview = (
+            f"git tag{force_flag} -a {shlex.quote(tag_name)} -m {shlex.quote(tag_message)}"
+        )
+        print(f"[dry-run] {cmd_preview}")
+        if push:
+            print(f"[dry-run] git push origin {shlex.quote(tag_name)}")
+        return
+
+    if not force:
+        result = ctx.run(
+            f"git rev-parse {shlex.quote(tag_name)}",
+            warn=True,
+            hide=True,
+            pty=False,
+        )
+        if result.ok:
+            raise RuntimeError(f"Tag {tag_name} already exists. Pass force=True to replace it.")
+
+    tag_parts = ["git", "tag"]
+    if force:
+        tag_parts.append("-f")
+    tag_parts.extend(["-a", tag_name, "-m", tag_message])
+    ctx.run(" ".join(shlex.quote(part) for part in tag_parts), echo=True)
+
+    if push:
+        ctx.run(f"git push origin {shlex.quote(tag_name)}", echo=True)
+
+
+@task(
+    help={
         "part": "Semantic version component to bump before publishing.",
         "index_url": "Package index endpoint for the publish step.",
         "token": "API token passed to uv publish (printed if provided).",
         "skip_existing": "Skip artifacts already present on the target index.",
         "dry_run": "Log the composed workflow without executing it.",
+        "tag": "Create a git tag once publishing succeeds (defaults to true).",
+        "tag_prefix": "Prefix to prepend to the git tag name (defaults to 'v').",
+        "tag_message": "Custom message for the annotated git tag.",
+        "push_tag": "Push the git tag to origin after creation.",
+        "force_tag": "Replace an existing git tag with the same name.",
     },
 )
 def release(
@@ -157,6 +249,11 @@ def release(
     token: str | None = None,
     skip_existing: bool = False,
     dry_run: bool = False,
+    tag: bool = True,
+    tag_prefix: str = "v",
+    tag_message: str | None = None,
+    push_tag: bool = False,
+    force_tag: bool = False,
 ) -> None:
     """Bump the version, rebuild artifacts, and publish in one workflow.
 
@@ -167,14 +264,38 @@ def release(
         token: API token forwarded to `publish`.
         skip_existing: Skip previously uploaded artifacts.
         dry_run: Print each command without executing them.
+        tag: Create a git tag after publishing when True.
+        tag_prefix: Prefix applied to the git tag name.
+        tag_message: Annotated git tag message (defaults per tag).
+        push_tag: Push the git tag to origin after creation.
+        force_tag: Overwrite an existing tag.
     """
     ctx.invoke(bump_version, part=part, dry_run=dry_run)
     if dry_run:
         print("[dry-run] uv build")
         print("[dry-run] uv publish")
+        if tag:
+            simulated_version = _predict_bumped_version(ctx, part)
+            tag_name = f"{tag_prefix}{simulated_version}" if tag_prefix else simulated_version
+            message = tag_message or f"Release {tag_name}"
+            force_flag = " -f" if force_tag else ""
+            cmd_preview = (
+                f"git tag{force_flag} -a {shlex.quote(tag_name)} -m {shlex.quote(message)}"
+            )
+            print(f"[dry-run] {cmd_preview}")
+            if push_tag:
+                print(f"[dry-run] git push origin {shlex.quote(tag_name)}")
         return
     ctx.invoke(build)
     ctx.invoke(publish, index_url=index_url, token=token, skip_existing=skip_existing)
+    if tag:
+        ctx.invoke(
+            tag_version,
+            prefix=tag_prefix,
+            message=tag_message,
+            push=push_tag,
+            force=force_tag,
+        )
 
 
 @task(
@@ -277,6 +398,7 @@ namespace = Collection(
     build,
     bump_version,
     publish,
+    tag_version,
     release,
     tests,
     precommit,
