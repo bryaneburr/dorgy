@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dorgy"
-version = "0.1.4"
+version = "0.1.5"
 description = "AI-assisted CLI for organizing files."
 readme = "README.md"
 authors = [{ name = "Bryan E. Burr" }]
