@@ -122,3 +122,4 @@
 - Next actions: document release expectations in AGENTS, run `uv run pre-commit run --all-files`, and stage TestPyPI dry run instructions.
 - Completed TestPyPI dry run with `uv publish`, confirmed `dorgy` installs from the index, and smoke-tested the CLI (`dorgy --help`) in a clean environment.
 - Next actions: prepare production PyPI token, rerun `uv build`/`uv publish`, tag `v0.1.0`, and merge the release branch once CI is green.
+- Reduced CLI startup latency by deferring heavy imports via module-level lazy loaders, preserving monkeypatch-friendly attributes, and verified the new structure with `uv run pre-commit run --all-files`.
