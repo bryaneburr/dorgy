@@ -52,7 +52,7 @@ class ProcessingOptions(DorgyBaseModel):
     """
 
     process_images: bool = Field(
-        default=False,
+        default=True,
         validation_alias=AliasChoices("process_images", "use_vision_models"),
     )
     process_audio: bool = False
@@ -136,7 +136,7 @@ class OrganizationOptions(DorgyBaseModel):
     preserve_language: bool = False
     preserve_timestamps: bool = True
     preserve_extended_attributes: bool = True
-    rename_files: bool = True
+    rename_files: bool = False
 
 
 class AmbiguitySettings(DorgyBaseModel):

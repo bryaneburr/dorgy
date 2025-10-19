@@ -84,11 +84,68 @@ All commands accept `--json` for machine-readable output and share standardized 
 ## Configuration Essentials
 
 - The primary config file lives at `~/.dorgy/config.yaml`; environment variables follow `DORGY__SECTION__KEY`.
-- `processing` governs ingestion behaviour (batch sizes, captioning, concurrency, size limits). Enable `processing.process_images` to capture multimodal captions stored in `.dorgy/vision.json`.
-- `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation.
+- `processing` governs ingestion behaviour (batch sizes, captioning, concurrency, size limits). `processing.process_images` is enabled by default to capture multimodal captions stored in `.dorgy/vision.json`.
+- `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation. Automatic renaming is disabled by default (`organization.rename_files: false`) so classification runs remain non-destructive unless you opt in.
 - `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (future releases will also surface search defaults).
 - Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
 - DSPy providers are configured through the `llm` block. Set `DORGY_USE_FALLBACK=1` to force the heuristic classifier during local testing.
+
+### LLM Provider Configuration
+
+Configure language models through the `llm` block using `uv run dorgy config set llm.<field> <value>` or by editing `~/.dorgy/config.yaml`. The CLI also respects environment variables such as `DORGY__LLM__PROVIDER`, `DORGY__LLM__MODEL`, `DORGY__LLM__API_KEY`, and `DORGY__LLM__API_BASE_URL`.
+
+Common provider setups (substitute your own model names and API keys as needed):
+
+- **OpenAI**
+
+  ```bash
+  uv run dorgy config set llm.provider openai
+  uv run dorgy config set llm.model gpt-4o
+  uv run dorgy config set llm.api_key "$OPENAI_API_KEY"
+  ```
+
+  YAML equivalent:
+
+  ```yaml
+  llm:
+    provider: openai
+    model: gpt-4o
+    api_key: sk-...
+  ```
+
+- **Anthropic**
+
+  ```bash
+  uv run dorgy config set llm.provider anthropic
+  uv run dorgy config set llm.model claude-3-5-sonnet-20240620
+  uv run dorgy config set llm.api_key "$ANTHROPIC_API_KEY"
+  ```
+
+- **xAI (Grok)**
+
+  ```bash
+  uv run dorgy config set llm.provider xai
+  uv run dorgy config set llm.model grok-beta
+  uv run dorgy config set llm.api_key "$XAI_API_KEY"
+  ```
+
+- **Google Gemini**
+
+  ```bash
+  uv run dorgy config set llm.provider google
+  uv run dorgy config set llm.model gemini-1.5-pro
+  uv run dorgy config set llm.api_key "$GOOGLE_API_KEY"
+  ```
+
+- **Local / Custom Gateway**
+
+  ```bash
+  uv run dorgy config set llm.provider local
+  uv run dorgy config set llm.model llama3
+  uv run dorgy config set llm.api_base_url http://localhost:11434/v1
+  ```
+
+  When `llm.api_base_url` is set (e.g., Ollama, LM Studio, vLLM, or self-hosted gateways), `dorgy` sends requests directly to that endpoint and skips API-key enforcement.
 
 ---
 
@@ -158,8 +215,8 @@ For release-specific work, use the branch/review workflow documented above and e
 
 ## Authors
 
-- **[Codex](openai.com/codex) (ChatGPT-5 based agent)** – primary implementation and tactical design across ingestion, classification, organization, and tooling.
-- **Bryan E. Burr ([@bryaneburr](github.com/bryaneburr))** – supervisor, editor, and maintainer steering project direction and release planning.
+- **[Codex](https://openai.com/codex) (ChatGPT-5 based agent)** – primary implementation and tactical design across ingestion, classification, organization, and tooling.
+- **Bryan E. Burr ([@bryaneburr](https://github.com/bryaneburr))** – supervisor, editor, and maintainer steering project direction and release planning.
 
 ---
 

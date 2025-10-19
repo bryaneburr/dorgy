@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import shutil
@@ -56,6 +57,8 @@ from dorgy.state import (
     StateError,
     StateRepository,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -449,6 +452,7 @@ class WatchService:
         plan = OperationPlan()
         final_path_map: dict[Path, Path] = {}
         file_entries: list[dict[str, Any]] = []
+        vision_warning: str | None = None
 
         if ingestion_inputs:
             cache = self._classification_caches.get(source_root)
@@ -468,7 +472,9 @@ class WatchService:
                 try:
                     vision_captioner = VisionCaptioner(self._config.llm, cache=vision_cache)
                 except RuntimeError as exc:
-                    raise RuntimeError(str(exc)) from exc
+                    vision_warning = f"Vision captioning disabled: {exc}"
+                    LOGGER.warning("%s", vision_warning)
+                    vision_captioner = None
 
             max_size_bytes = None
             if self._config.processing.max_file_size_mb > 0:
@@ -566,6 +572,9 @@ class WatchService:
                 root=target_root,
                 conflict_strategy=self._config.organization.conflict_resolution,
             )
+
+        if vision_warning:
+            plan.notes.append(vision_warning)
 
         delete_operations = [
             DeleteOperation(
