@@ -7,7 +7,25 @@ name = "dorgy"
 version = "0.1.0"
 description = "AI-assisted CLI for organizing files."
 readme = "README.md"
+authors = [{ name = "Bryan E. Burr" }]
+license = { file = "LICENSE" }
 requires-python = ">=3.11,<3.13"
+keywords = ["cli", "automation", "productivity", "document organization", "ai"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Utilities",
+    "Topic :: Office/Business",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
+urls = { Homepage = "https://github.com/bryaneburr/dorgie", "Bug Tracker" = "https://github.com/bryaneburr/dorgie/issues", Documentation = "https://github.com/bryaneburr/dorgie#readme" }
 dependencies = [
     "click>=8.0.0",
     "rich>=13.0.0",
@@ -59,3 +77,9 @@ strict_optional = true
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true

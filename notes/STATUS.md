@@ -114,3 +114,11 @@
 - Added shared `--prompt-file` support for `dorgy org` and `dorgy watch`, loading UTF-8 instructions via `resolve_prompt_text` so file-based prompts override inline `--prompt` values and flow through JSON payloads.
 - Extended CLI integration tests to cover prompt file precedence for both commands and verified via `uv run pytest tests/test_cli_org.py::test_cli_org_prompt_file_overrides_inline_prompt tests/test_cli_watch.py::test_cli_watch_prompt_file_overrides_inline_prompt`.
 - Updated SPEC usage examples and CLI AGENTS guidance to document the new flag; next actions: monitor prompt-handling feedback and consider exposing prompt templates in config if automation asks for reusable defaults.
+
+## 2025-10-29
+- Spun up `feature/release-prep` for distribution work so metadata and publishing scripts stay isolated from `main`.
+- Polished `pyproject.toml` with author, license, keywords, classifiers, and canonical project URLs to prep PyPI presentation; confirmed packaging still builds locally.
+- Marked Phase 9 \"Distribution & Release Prep\" as in progress inside SPEC to track the new milestone.
+- Next actions: document release expectations in AGENTS, run `uv run pre-commit run --all-files`, and stage TestPyPI dry run instructions.
+- Completed TestPyPI dry run with `uv publish`, confirmed `dorgy` installs from the index, and smoke-tested the CLI (`dorgy --help`) in a clean environment.
+- Next actions: prepare production PyPI token, rerun `uv build`/`uv publish`, tag `v0.1.0`, and merge the release branch once CI is green.

@@ -319,6 +319,7 @@ The project will progress through the following phases. Update the status column
 | [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [~] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
+| [~] | Phase 9 – Distribution & Release Prep | PyPI metadata polish, TestPyPI validation, release documentation, CI gating for publishing |
 
 ## Work Tracking
 
