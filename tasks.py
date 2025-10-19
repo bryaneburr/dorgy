@@ -64,6 +64,32 @@ def _predict_bumped_version(ctx: Context, part: str) -> str:
     return result.stdout.strip()
 
 
+def _commit_version_files(ctx: Context, files: Sequence[str], message: str) -> bool:
+    """Stage the provided files and commit them with the supplied message.
+
+    Args:
+        ctx: Invoke execution context.
+        files: Iterable of file paths to stage.
+        message: Commit message to use when changes are present.
+
+    Returns:
+        bool: ``True`` when a commit was created, ``False`` otherwise.
+    """
+
+    files_args = " ".join(shlex.quote(file) for file in files)
+    status = ctx.run(
+        f"git status --porcelain -- {files_args}",
+        hide=True,
+        pty=False,
+    ).stdout.strip()
+    if not status:
+        print("No version file changes detected; skipping commit.")
+        return False
+    ctx.run(f"git add {files_args}", echo=True)
+    ctx.run(f"git commit -m {shlex.quote(message)}", echo=True)
+    return True
+
+
 @task
 def sync(ctx: Context, dev: bool = True) -> None:
     """Synchronize the project's virtual environment with uv.
@@ -240,6 +266,8 @@ def tag_version(
         "tag_message": "Custom message for the annotated git tag.",
         "push_tag": "Push the git tag to origin after creation.",
         "force_tag": "Replace an existing git tag with the same name.",
+        "commit": "Commit version bump artifacts before building (defaults to true).",
+        "commit_message": "Override the git commit message for version bumps.",
     },
 )
 def release(
@@ -254,6 +282,8 @@ def release(
     tag_message: str | None = None,
     push_tag: bool = False,
     force_tag: bool = False,
+    commit: bool = True,
+    commit_message: str | None = None,
 ) -> None:
     """Bump the version, rebuild artifacts, and publish in one workflow.
 
@@ -269,11 +299,18 @@ def release(
         tag_message: Annotated git tag message (defaults per tag).
         push_tag: Push the git tag to origin after creation.
         force_tag: Overwrite an existing tag.
+        commit: Commit version files prior to building/publishing.
+        commit_message: Optional commit message override.
     """
     bump_version(ctx, part=part, dry_run=dry_run)
     if dry_run:
         print("[dry-run] uv build")
         print("[dry-run] uv publish")
+        if commit:
+            simulated_version = _predict_bumped_version(ctx, part)
+            message = commit_message or f"chore: bump version to {simulated_version}"
+            print("[dry-run] git add pyproject.toml uv.lock")
+            print(f"[dry-run] git commit -m {shlex.quote(message)}")
         if tag:
             simulated_version = _predict_bumped_version(ctx, part)
             tag_name = f"{tag_prefix}{simulated_version}" if tag_prefix else simulated_version
@@ -286,6 +323,10 @@ def release(
             if push_tag:
                 print(f"[dry-run] git push origin {shlex.quote(tag_name)}")
         return
+    version_after_bump = _get_current_version(ctx)
+    if commit:
+        message = commit_message or f"chore: bump version to {version_after_bump}"
+        _commit_version_files(ctx, ("pyproject.toml", "uv.lock"), message)
     build(ctx)
     publish(ctx, index_url=index_url, token=token, skip_existing=skip_existing)
     if tag:

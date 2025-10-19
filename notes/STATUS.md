@@ -129,5 +129,6 @@
 - Added `invoke` to the dev extra, refreshed `uv.lock`, and ran `uv sync --extra dev` so local environments pick up the dependency.
 - Verified availability with `uv run invoke --list`, confirming release/test/ci tasks show up alongside the new helpers.
 - Added git tagging Invoke task (`invoke tag-version`) and extended `invoke release` to support tagging/pushing `v<version>` after publishes.
+- Release automation now stages and commits `pyproject.toml`/`uv.lock` after version bumps so tagging always lands on a clean tree.
 - Addressed CI-only failure in `test_cli_org_prompt_file_overrides_inline_prompt` by writing a real PNG via Pillow so python-magic detects it as an image across Linux runners.
 - Next actions: surface the Invoke collection in README release guidance and decide whether SPEC Phase 9 should reference the `invoke release` path explicitly.
