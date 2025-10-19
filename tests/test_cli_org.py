@@ -235,6 +235,74 @@ def test_cli_org_records_vision_metadata(tmp_path: Path, monkeypatch: pytest.Mon
     assert record["vision_reasoning"] == "Test caption"
 
 
+def test_cli_org_prompt_file_overrides_inline_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ensure `--prompt-file` overrides inline prompts for organization runs."""
+
+    root = tmp_path / "prompt-file"
+    root.mkdir()
+    (root / "invoice.png").write_text("binarydata", encoding="utf-8")
+
+    prompt_file = tmp_path / "instructions.txt"
+    prompt_content = "Line one\nLine two with detail"
+    prompt_file.write_text(prompt_content, encoding="utf-8")
+
+    class StubVisionCaptioner:
+        """Stub captioner capturing prompt usage."""
+
+        instances: list["StubVisionCaptioner"] = []
+
+        def __init__(self, *args, **kwargs) -> None:  # pragma: no cover - simple stub
+            self.calls: list[tuple[Path, str | None, str | None]] = []
+            StubVisionCaptioner.instances.append(self)
+
+        def caption(
+            self,
+            path: Path,
+            *,
+            cache_key: str | None,
+            prompt: str | None = None,
+        ) -> VisionCaption:
+            self.calls.append((path, cache_key, prompt))
+            return VisionCaption(
+                caption="Receipt from ACME Corp",
+                labels=["Finance", "Receipt"],
+                confidence=0.95,
+                reasoning="Test caption",
+            )
+
+        def save_cache(self) -> None:
+            return None
+
+    monkeypatch.setattr("dorgy.cli.VisionCaptioner", StubVisionCaptioner)
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("processing:\n  process_images: true\n", encoding="utf-8")
+    result = runner.invoke(
+        cli,
+        [
+            "org",
+            str(root),
+            "--prompt",
+            "This should be ignored",
+            "--prompt-file",
+            str(prompt_file),
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert StubVisionCaptioner.instances
+    assert StubVisionCaptioner.instances[0].calls
+    recorded_prompt = StubVisionCaptioner.instances[0].calls[0][2]
+    assert recorded_prompt == prompt_content
+
+
 def test_cli_undo_dry_run_shows_snapshot(tmp_path: Path) -> None:
     """Undo dry-run should surface snapshot details for user confirmation."""
 

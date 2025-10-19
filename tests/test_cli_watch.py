@@ -78,6 +78,43 @@ def test_cli_watch_once_json(tmp_path: Path) -> None:
     assert batch["context"]["source_root"].endswith("json")
 
 
+def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
+    """Ensure watch JSON payload reflects prompt file overrides."""
+
+    root = tmp_path / "prompt-watch"
+    root.mkdir()
+    (root / "report.txt").write_text("content", encoding="utf-8")
+
+    prompt_file = tmp_path / "prompt.txt"
+    prompt_content = "Watch prompt\nSecond line"
+    prompt_file.write_text(prompt_content, encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(
+        cli,
+        [
+            "watch",
+            str(root),
+            "--once",
+            "--json",
+            "--prompt",
+            "ignored prompt",
+            "--prompt-file",
+            str(prompt_file),
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    batches = payload.get("batches", [])
+    assert batches
+    context_prompt = batches[0]["context"]["prompt"]
+    assert context_prompt == prompt_content
+
+
 def _state_paths(root: Path) -> set[str]:
     """Return the set of tracked relative paths for ``root``."""
 

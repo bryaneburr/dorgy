@@ -108,6 +108,24 @@ def prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback
     return click.option("--prompt", type=str, help=description)
 
 
+def prompt_file_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
+    """Return a Click option decorator for prompt file overrides.
+
+    Args:
+        help_text: Optional help text override.
+
+    Returns:
+        Callable[[Callback], Callback]: Decorator applying the option.
+    """
+
+    description = help_text or "Read prompt instructions from a text file."
+    return click.option(
+        "--prompt-file",
+        type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
+        help=description,
+    )
+
+
 def recursive_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
     """Return a Click option decorator for recursive behavior toggles.
 
@@ -193,6 +211,7 @@ __all__ = [
     "json_option",
     "output_option",
     "prompt_option",
+    "prompt_file_option",
     "quiet_option",
     "recursive_option",
     "resolve_mode_settings",

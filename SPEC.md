@@ -28,6 +28,9 @@ dorgy org . -r
 # with additional instructions
 dorgy org . -r --prompt "Ensure documents from the same tax year are grouped together"
 
+# Supply additional instructions from a file
+dorgy org . --prompt-file prompts/tax-guidelines.txt
+
 # Organize the ~/Downloads directory
 dorgy org ~/Downloads
 
@@ -49,6 +52,9 @@ dorgy org . --json
 # new files as they arrive
 dorgy watch .
 dorgy watch . -r --output some/folder # with options/flags
+
+# Watch a directory using instructions stored in a prompt file
+dorgy watch . --once --json --prompt-file prompts/watch-guidance.txt
 
 # Config
 dorgy config edit # edit config

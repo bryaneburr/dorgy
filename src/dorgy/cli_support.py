@@ -46,6 +46,27 @@ def decision_cache_key(descriptor: FileDescriptor, root: Path) -> Optional[str]:
         return str(descriptor.path)
 
 
+def resolve_prompt_text(prompt: Optional[str], prompt_file: Optional[str]) -> Optional[str]:
+    """Return the prompt text, preferring the contents of `prompt_file` when provided.
+
+    Args:
+        prompt: Prompt supplied directly via the CLI flag.
+        prompt_file: Path to a file containing prompt instructions.
+
+    Returns:
+        Optional[str]: Prompt content ready for downstream components.
+
+    Raises:
+        OSError: If the prompt file cannot be read.
+        UnicodeDecodeError: If the prompt file contains undecodable text.
+    """
+
+    if not prompt_file:
+        return prompt
+    path = Path(prompt_file).expanduser()
+    return path.read_text(encoding="utf-8")
+
+
 def run_classification(
     descriptors: Iterable[FileDescriptor],
     prompt: Optional[str],
@@ -383,6 +404,7 @@ __all__ = [
     "compute_org_counts",
     "decision_cache_key",
     "descriptor_to_record",
+    "resolve_prompt_text",
     "relative_to_collection",
     "run_classification",
     "zip_decisions",

@@ -5,6 +5,7 @@
 - Keep `--summary`, `--quiet`, and `--json` validation logic aligned across commands; update integration tests when introducing new mutually exclusive flags.
 - Machine-readable outputs should mirror dry-run and executed payloads, including `context` and `counts` metadata; extend tests in `tests/test_cli_org.py` for new JSON schemas.
 - Leverage option factories in `dorgy.cli.options` (JSON/summary/quiet/dry-run/etc.) and `resolve_mode_settings` to keep flag behaviour consistent; new commands should not reimplement this logic.
+- `--prompt-file` is available on `org` and `watch`; it must override `--prompt`, read UTF-8 text, and surface through JSON payloads/tests when prompt handling changes.
 - Progress instrumentation lives behind `_ProgressScope` and should only activate when `config.cli.progress_enabled` and the console is interactive; disable automatically for JSON/quiet/summary contexts.
 - `dorgy search` (and future read-only commands) operate solely on `StateRepository` data—respect filters, enforce config-driven defaults (e.g., `cli.search_default_limit`), and return results sorted/limited consistently across text and JSON outputs.
 - `dorgy mv` must route operations through `OperationExecutor` so staging/rollback semantics remain intact; update state/history via repository helpers, guard `.dorgy` metadata folders, and expose conflict notes in both text and JSON responses.

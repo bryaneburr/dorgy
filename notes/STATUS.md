@@ -109,3 +109,8 @@
 - Added PNG conversion via in-memory buffers so HEIC/AVIF/JXL/ICO assets no longer trigger multimodal capability errors during captioning.
 - `uv run pytest` remains green (68 passed, 1 skipped); monitor watch/org runs against HEIC collections to confirm the regression is resolved.
 - Tweaked structure planner instructions to prioritise grouping files into directories so fewer items remain at the root level.
+
+## 2025-10-28
+- Added shared `--prompt-file` support for `dorgy org` and `dorgy watch`, loading UTF-8 instructions via `resolve_prompt_text` so file-based prompts override inline `--prompt` values and flow through JSON payloads.
+- Extended CLI integration tests to cover prompt file precedence for both commands and verified via `uv run pytest tests/test_cli_org.py::test_cli_org_prompt_file_overrides_inline_prompt tests/test_cli_watch.py::test_cli_watch_prompt_file_overrides_inline_prompt`.
+- Updated SPEC usage examples and CLI AGENTS guidance to document the new flag; next actions: monitor prompt-handling feedback and consider exposing prompt templates in config if automation asks for reusable defaults.
