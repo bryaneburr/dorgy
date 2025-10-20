@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
 from dorgy.classification.engine import ClassificationEngine
+from dorgy.classification.exceptions import LLMUnavailableError
 from dorgy.classification.models import ClassificationRequest
 from dorgy.ingestion.models import FileDescriptor
 
@@ -47,3 +50,11 @@ def test_fallback_handles_unknown_types() -> None:
 
     assert result.decisions[0].primary_category == "General"
     assert result.decisions[0].needs_review is True
+
+
+def test_engine_raises_without_fallback_when_llm_missing(monkeypatch) -> None:
+    monkeypatch.setenv("DORGY_USE_FALLBACK", "0")
+    monkeypatch.setattr("dorgy.classification.engine.dspy", None)
+
+    with pytest.raises(LLMUnavailableError):
+        ClassificationEngine()

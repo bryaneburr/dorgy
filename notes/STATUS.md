@@ -138,3 +138,9 @@
 - Softened CLI/watch vision initialization so missing LLM credentials fall back to non-vision runs while surfacing plan notes and warnings for automation.
 - Documented provider-specific LLM setup (OpenAI, Anthropic, xAI, Google Gemini, local gateways) in README to help operators wire credentials via `dorgy config`.
 - Verified rename/vision regression coverage with `uv run pytest tests/test_cli_org.py::test_cli_org_renames_files_when_enabled`; next actions: broaden watch JSON tests to assert the vision-captioning warning note propagates when captioning is auto-disabled.
+
+## 2025-11-01
+- Hardened structure planning by normalizing DSPy responses that wrap JSON in conversational text or fenced code blocks, ensuring LLM proposals drive destination maps instead of falling back to category folders.
+- Added dedicated coverage in `tests/test_structure_planner.py` for the new decoding helper and refreshed AGENTS guidance so future prompt tweaks keep the parser/test expectations aligned.
+- `uv run pytest` passes locally (79 passed, 1 skipped); next actions: capture a regression fixture from a real organization run to validate the end-to-end tree output once the planner is consistently returning JSON.
+- Enforced DSPy as the default path by raising `LLMUnavailableError` when classification/structure planning runs without the fallback flag and `LLMResponseError` when responses are unusable, propagating rich CLI errors so operators configure credentials instead of silently hitting heuristics.

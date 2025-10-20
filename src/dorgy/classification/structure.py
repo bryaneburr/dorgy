@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
@@ -14,11 +15,14 @@ except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
 from dorgy.classification.dspy_logging import configure_dspy_logging
+from dorgy.classification.exceptions import LLMResponseError, LLMUnavailableError
 from dorgy.classification.models import ClassificationDecision
 from dorgy.config.models import LLMSettings
 from dorgy.ingestion.models import FileDescriptor
 
 LOGGER = logging.getLogger(__name__)
+
+_CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
 class FileTreeSignature(dspy.Signature):  # type: ignore[misc]
@@ -35,17 +39,25 @@ class StructurePlanner:
     def __init__(self, settings: Optional[LLMSettings] = None) -> None:
         use_fallback = os.getenv("DORGY_USE_FALLBACK") == "1"
         self._settings = settings or LLMSettings()
-        self._enabled = not use_fallback and dspy is not None
+        self._use_fallback = use_fallback
+        self._enabled = False
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
-        if self._enabled:
-            configure_dspy_logging()
-            self._configure_language_model()
-            self._program = dspy.Predict(FileTreeSignature)
-            LOGGER.debug(
-                "Structure planner initialised with LLM provider %s.", self._settings.provider
+
+        if use_fallback:
+            LOGGER.info("Structure planner fallback enabled by DORGY_USE_FALLBACK=1.")
+            return
+
+        if dspy is None:
+            raise LLMUnavailableError(
+                "Structure planner requires DSPy. Install the `dspy` package or set "
+                "DORGY_USE_FALLBACK=1 to use heuristic structure placement."
             )
-        else:
-            LOGGER.debug("Structure planner disabled (fallback or DSPy unavailable).")
+
+        configure_dspy_logging()
+        self._configure_language_model()
+        self._program = dspy.Predict(FileTreeSignature)
+        self._enabled = True
+        LOGGER.debug("Structure planner initialised with LLM provider %s.", self._settings.provider)
 
     def _configure_language_model(self) -> None:
         if dspy is None:  # pragma: no cover
@@ -75,7 +87,7 @@ class StructurePlanner:
             and self._settings.api_base_url is None
             and api_key_missing
         ):
-            raise RuntimeError(
+            raise LLMUnavailableError(
                 "Structure planner requires llm.api_key when using a remote provider."
             )
 
@@ -91,7 +103,13 @@ class StructurePlanner:
         if self._settings.api_key is not None:
             lm_kwargs["api_key"] = self._settings.api_key
 
-        language_model = dspy.LM(**lm_kwargs)
+        try:
+            language_model = dspy.LM(**lm_kwargs)
+        except Exception as exc:  # pragma: no cover - DSPy misconfiguration
+            raise LLMUnavailableError(
+                "Unable to configure the DSPy language model for structure planning. "
+                "Verify your llm.* settings (provider/model/api_key/api_base_url)."
+            ) from exc
         dspy.settings.configure(lm=language_model)
 
     def propose(
@@ -112,7 +130,7 @@ class StructurePlanner:
             Mapping of descriptor absolute paths to relative destinations.
         """
 
-        if not self._enabled or self._program is None:
+        if self._use_fallback or not self._enabled or self._program is None:
             return {}
 
         descriptor_list = list(descriptors)
@@ -184,18 +202,26 @@ class StructurePlanner:
         tree_json = getattr(response, "tree_json", "") if response else ""
         if not tree_json:
             LOGGER.debug("Structure planner returned empty tree response.")
-            return {}
+            raise LLMResponseError(
+                "Structure planner returned an empty response; enable DORGY_USE_FALLBACK=1 to "
+                "continue with heuristic structure placement."
+            )
 
-        try:
-            parsed = json.loads(tree_json)
-        except json.JSONDecodeError as exc:
-            LOGGER.debug("Failed to parse structure planner response: %s", exc)
-            return {}
+        parsed = self._decode_tree_payload(tree_json)
+        if parsed is None:
+            snippet = tree_json if isinstance(tree_json, str) else repr(tree_json)
+            LOGGER.debug("Structure planner produced unparseable JSON: %s", snippet[:200])
+            raise LLMResponseError(
+                "Structure planner produced an invalid JSON payload. "
+                f"Partial response: {snippet[:160]!r}"
+            )
 
         files = parsed.get("files")
         if not isinstance(files, list):
             LOGGER.debug("Structure planner response missing 'files' array.")
-            return {}
+            raise LLMResponseError(
+                "Structure planner response is missing the required 'files' array."
+            )
 
         mapping: Dict[Path, Path] = {}
         for entry in files:
@@ -211,6 +237,16 @@ class StructurePlanner:
             destination_path = Path(destination.strip().lstrip("/\\"))
             if destination_path.parts:
                 mapping[source_path] = destination_path
+
+        if descriptor_list and not mapping:
+            LOGGER.debug(
+                "Structure planner produced no destinations for %d descriptor(s).",
+                len(descriptor_list),
+            )
+            raise LLMResponseError(
+                "Structure planner did not produce destinations for any files. "
+                "Verify the configured LLM settings or set DORGY_USE_FALLBACK=1 to use heuristics."
+            )
 
         LOGGER.debug("Structure planner produced destinations for %d file(s).", len(mapping))
         return mapping
@@ -229,3 +265,100 @@ class StructurePlanner:
             if str(descriptor_relative).strip() == relative.strip():
                 return descriptor.path
         return None
+
+    @staticmethod
+    def _decode_tree_payload(tree_json: object) -> Optional[dict]:
+        """Return parsed JSON content from structure planner output.
+
+        Args:
+            tree_json: Raw payload produced by the DSPy program.
+
+        Returns:
+            Parsed JSON object when available, otherwise ``None``.
+        """
+
+        if isinstance(tree_json, dict):
+            return tree_json
+        if isinstance(tree_json, list):
+            return {"files": tree_json}
+        if not isinstance(tree_json, str):
+            return None
+
+        text = tree_json.strip()
+        if not text:
+            return None
+
+        candidates = StructurePlanner._candidate_json_strings(text)
+        decoder = json.JSONDecoder()
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+            except json.JSONDecodeError:
+                try:
+                    parsed, _ = decoder.raw_decode(candidate)
+                except json.JSONDecodeError:
+                    continue
+            if isinstance(parsed, dict):
+                return parsed
+            if isinstance(parsed, list):
+                return {"files": parsed}
+        return None
+
+    @staticmethod
+    def _candidate_json_strings(value: str) -> list[str]:
+        """Return candidate JSON segments extracted from ``value``.
+
+        Args:
+            value: Raw textual payload returned by the language model.
+
+        Returns:
+            List of potential JSON substrings ordered by preference.
+        """
+
+        candidates: list[str] = []
+        match = _CODE_FENCE_PATTERN.search(value)
+        if match:
+            body = match.group("body").strip()
+            if body:
+                candidates.append(body)
+
+        if value:
+            candidates.append(value)
+
+        sliced = StructurePlanner._slice_json_segment(value, "{", "}")
+        if sliced is not None:
+            candidates.append(sliced)
+
+        array_slice = StructurePlanner._slice_json_segment(value, "[", "]")
+        if array_slice is not None:
+            candidates.append(array_slice)
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            stripped = candidate.strip()
+            if not stripped or stripped in seen:
+                continue
+            seen.add(stripped)
+            normalized.append(stripped)
+        return normalized
+
+    @staticmethod
+    def _slice_json_segment(value: str, opener: str, closer: str) -> Optional[str]:
+        """Return substring enclosed by ``opener`` and ``closer`` when present.
+
+        Args:
+            value: Source string to inspect.
+            opener: Starting delimiter to search for.
+            closer: Ending delimiter to search for.
+
+        Returns:
+            Extracted substring when both delimiters are present; otherwise ``None``.
+        """
+
+        start = value.find(opener)
+        end = value.rfind(closer)
+        if start == -1 or end == -1 or end <= start:
+            return None
+        return value[start : end + 1]

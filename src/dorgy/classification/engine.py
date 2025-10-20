@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - executed when DSPy absent
     dspy = None
 
 from dorgy.classification.dspy_logging import configure_dspy_logging
+from dorgy.classification.exceptions import LLMUnavailableError
 from dorgy.config.models import LLMSettings
 
 from .models import (
@@ -62,7 +63,7 @@ class ClassificationEngine:
             return
 
         if dspy is None:
-            raise RuntimeError(
+            raise LLMUnavailableError(
                 "DSPy is not installed. Install the `dspy` package (and any provider-specific "
                 "dependencies), or set DORGY_USE_FALLBACK=1 to enable the heuristic classifier."
             )
@@ -270,7 +271,7 @@ class ClassificationEngine:
             ]
         )
         if not configured:
-            raise RuntimeError(
+            raise LLMUnavailableError(
                 "LLM configuration is incomplete. Update ~/.dorgy/config.yaml with valid values "
                 "for the llm block (provider/model/api_key or api_base_url), or set "
                 "DORGY_USE_FALLBACK=1 to force the heuristic classifier."
@@ -289,7 +290,7 @@ class ClassificationEngine:
             and self._settings.api_base_url is None
             and api_key_missing
         ):
-            raise RuntimeError(
+            raise LLMUnavailableError(
                 "llm.provider is set to a remote provider but llm.api_key is missing. Provide the "
                 "API key or set DORGY_USE_FALLBACK=1 to use the heuristic classifier."
             )
@@ -312,7 +313,7 @@ class ClassificationEngine:
             language_model = dspy.LM(**lm_kwargs)
             dspy.settings.configure(lm=language_model)
         except Exception as exc:  # pragma: no cover - DSPy misconfiguration
-            raise RuntimeError(
+            raise LLMUnavailableError(
                 "Unable to configure the DSPy language model. Verify your llm.* settings "
                 "(provider/model/api_key/api_base_url) or set DORGY_USE_FALLBACK=1 to use the "
                 "heuristic classifier."
@@ -328,7 +329,7 @@ class ClassificationEngine:
             ClassificationDecision: Result derived from DSPy output.
         """
         if self._program is None:
-            raise RuntimeError("DSPy program has not been initialised")
+            raise LLMUnavailableError("DSPy program has not been initialised")
 
         descriptor = request.descriptor
         metadata_dump = json.dumps(descriptor.metadata, ensure_ascii=False)
