@@ -130,12 +130,39 @@ class OperationExecutor:
         finally:
             self._cleanup_session(session_dir)
 
-    def rollback(self, root: Path) -> None:
+    def rollback(
+        self,
+        root: Path,
+        *,
+        preserved_directories: Iterable[str] | None = None,
+    ) -> None:
         """Rollback the last applied plan."""
 
         plan = self._last_plan or self._load_plan(root)
         if plan is None:
             raise RuntimeError("No organization plan available for rollback.")
+
+        preserved: set[Path] = set()
+        if preserved_directories:
+            root_resolved = root.resolve()
+            for entry in preserved_directories:
+                if not entry:
+                    continue
+                relative = Path(entry)
+                if relative.is_absolute():
+                    continue
+                candidate = (root_resolved / relative).resolve()
+                try:
+                    candidate.relative_to(root_resolved)
+                except ValueError:
+                    continue
+                preserved.add(candidate)
+
+        candidate_dirs: set[Path] = set()
+        for move_op in plan.moves:
+            candidate_dirs.update(self._directories_to_prune(move_op.destination, root))
+        for rename_op in plan.renames:
+            candidate_dirs.update(self._directories_to_prune(rename_op.destination, root))
 
         for move_op in reversed(plan.moves):
             if move_op.destination.exists():
@@ -145,6 +172,7 @@ class OperationExecutor:
             if rename_op.destination.exists():
                 rename_op.destination.rename(rename_op.source)
 
+        self._remove_empty_directories(candidate_dirs, root, preserved)
         self._persist_plan(None, root)
         self._last_plan = None
 
@@ -252,6 +280,50 @@ class OperationExecutor:
             return str(path.resolve().relative_to(root.resolve()))
         except ValueError:
             return str(path.resolve())
+
+    def _directories_to_prune(self, path: Path, root: Path) -> set[Path]:
+        directories: set[Path] = set()
+        root_resolved = root.resolve()
+        current = path.resolve().parent
+        while True:
+            try:
+                current.relative_to(root_resolved)
+            except ValueError:
+                break
+            if current == root_resolved:
+                break
+            directories.add(current)
+            current = current.parent
+        return directories
+
+    def _remove_empty_directories(
+        self,
+        candidates: set[Path],
+        root: Path,
+        preserved: set[Path],
+    ) -> None:
+        if not candidates:
+            return
+
+        root_resolved = root.resolve()
+        ordered = sorted(
+            {candidate.resolve() for candidate in candidates},
+            key=lambda path: len(path.parts),
+            reverse=True,
+        )
+        for directory in ordered:
+            if directory in preserved:
+                continue
+            try:
+                directory.relative_to(root_resolved)
+            except ValueError:
+                continue
+            if directory == root_resolved:
+                continue
+            try:
+                directory.rmdir()
+            except OSError:
+                continue
 
     def _persist_plan(self, plan: OperationPlan | None, root: Path) -> None:
         plan_path = self._plan_path(root)

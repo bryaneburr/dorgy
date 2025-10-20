@@ -2850,8 +2850,14 @@ def undo(
             )
             return
 
+        preserved_dirs: list[str] | None = None
+        if snapshot_payload:
+            raw_dirs = snapshot_payload.get("directories")
+            if isinstance(raw_dirs, list):
+                preserved_dirs = [entry for entry in raw_dirs if isinstance(entry, str)]
+
         try:
-            executor.rollback(root)
+            executor.rollback(root, preserved_directories=preserved_dirs)
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
 
