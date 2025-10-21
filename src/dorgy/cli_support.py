@@ -236,6 +236,8 @@ def build_original_snapshot(
 
     generated_at = datetime.now(timezone.utc).isoformat()
     entries: list[dict[str, Any]] = []
+    directories: set[str] = set()
+    root_resolved = root.resolve()
     for descriptor in descriptors:
         entries.append(
             {
@@ -248,7 +250,24 @@ def build_original_snapshot(
             }
         )
 
-    return {"generated_at": generated_at, "entries": entries}
+        current = descriptor.path.resolve().parent
+        while True:
+            try:
+                relative_dir = current.relative_to(root_resolved)
+            except ValueError:
+                break
+            if not relative_dir.parts:
+                break
+            directories.add(relative_dir.as_posix())
+            if current == root_resolved:
+                break
+            current = current.parent
+
+    return {
+        "generated_at": generated_at,
+        "entries": entries,
+        "directories": sorted(directories),
+    }
 
 
 def descriptor_to_record(

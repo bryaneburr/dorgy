@@ -55,6 +55,8 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "ClassificationCache": ("dorgy.classification", "ClassificationCache"),
     "VisionCache": ("dorgy.classification", "VisionCache"),
     "VisionCaptioner": ("dorgy.classification", "VisionCaptioner"),
+    "LLMUnavailableError": ("dorgy.classification.exceptions", "LLMUnavailableError"),
+    "LLMResponseError": ("dorgy.classification.exceptions", "LLMResponseError"),
     "StructurePlanner": ("dorgy.classification.structure", "StructurePlanner"),
     "FileDescriptor": ("dorgy.ingestion", "FileDescriptor"),
     "IngestionPipeline": ("dorgy.ingestion", "IngestionPipeline"),
@@ -804,6 +806,12 @@ def org(
     StructurePlannerCls = _load_dependency(
         "StructurePlanner", "dorgy.classification.structure", "StructurePlanner"
     )
+    LLMUnavailableError = _load_dependency(
+        "LLMUnavailableError", "dorgy.classification.exceptions", "LLMUnavailableError"
+    )
+    LLMResponseError = _load_dependency(
+        "LLMResponseError", "dorgy.classification.exceptions", "LLMResponseError"
+    )
     IngestionPipelineCls = _load_dependency(
         "IngestionPipeline", "dorgy.ingestion", "IngestionPipeline"
     )
@@ -1069,6 +1077,14 @@ def org(
                     )
                     if structure_task is not None:
                         structure_task.complete("Structure plan ready")
+                except LLMUnavailableError:
+                    if structure_task is not None:
+                        structure_task.complete("Structure plan skipped")
+                    raise
+                except LLMResponseError:
+                    if structure_task is not None:
+                        structure_task.complete("Structure plan failed")
+                    raise
                 except Exception as exc:  # pragma: no cover - best-effort hint
                     if structure_task is not None:
                         structure_task.complete("Structure plan skipped")
@@ -1455,6 +1471,20 @@ def org(
             console.print_json(data=json_payload)
     except ConfigError as exc:
         _handle_cli_error(str(exc), code="config_error", json_output=json_enabled, original=exc)
+    except LLMUnavailableError as exc:
+        _handle_cli_error(
+            str(exc),
+            code="llm_unavailable",
+            json_output=json_enabled,
+            original=exc,
+        )
+    except LLMResponseError as exc:
+        _handle_cli_error(
+            str(exc),
+            code="llm_response_error",
+            json_output=json_enabled,
+            original=exc,
+        )
     except click.ClickException as exc:
         _handle_cli_error(str(exc), code="cli_error", json_output=json_enabled, original=exc)
     except Exception as exc:
@@ -1505,6 +1535,12 @@ def watch(
     from dorgy.cli_support import resolve_prompt_text
 
     WatchService = _load_dependency("WatchService", "dorgy.watch", "WatchService")
+    LLMUnavailableError = _load_dependency(
+        "LLMUnavailableError", "dorgy.classification.exceptions", "LLMUnavailableError"
+    )
+    LLMResponseError = _load_dependency(
+        "LLMResponseError", "dorgy.classification.exceptions", "LLMResponseError"
+    )
 
     if not paths:
         raise click.ClickException("Provide at least one PATH to monitor.")
@@ -1569,11 +1605,35 @@ def watch(
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
+    except LLMUnavailableError as exc:
+        _handle_cli_error(str(exc), code="llm_unavailable", json_output=json_output, original=exc)
+        return
+    except LLMResponseError as exc:
+        _handle_cli_error(
+            str(exc), code="llm_response_error", json_output=json_output, original=exc
+        )
+        return
 
     if once:
         with _ProgressScope(progress_enabled) as progress:
             task = progress.start("Processing watch batch")
-            batches = service.process_once()
+            try:
+                batches = service.process_once()
+            except LLMUnavailableError as exc:
+                task.complete("Watch run aborted")
+                _handle_cli_error(
+                    str(exc), code="llm_unavailable", json_output=json_output, original=exc
+                )
+                return
+            except LLMResponseError as exc:
+                task.complete("Watch run aborted")
+                _handle_cli_error(
+                    str(exc),
+                    code="llm_response_error",
+                    json_output=json_output,
+                    original=exc,
+                )
+                return
             task.complete("Watch run complete")
         if json_output:
             console.print_json(data={"batches": [batch.json_payload for batch in batches]})
@@ -1622,6 +1682,12 @@ def watch(
                 quiet=quiet_enabled,
                 summary_only=summary_only,
             )
+    except LLMUnavailableError as exc:
+        _handle_cli_error(str(exc), code="llm_unavailable", json_output=json_output, original=exc)
+    except LLMResponseError as exc:
+        _handle_cli_error(
+            str(exc), code="llm_response_error", json_output=json_output, original=exc
+        )
     except RuntimeError as exc:
         _handle_cli_error(
             str(exc), code="watch_runtime_error", json_output=json_output, original=exc
@@ -2784,8 +2850,14 @@ def undo(
             )
             return
 
+        preserved_dirs: list[str] | None = None
+        if snapshot_payload:
+            raw_dirs = snapshot_payload.get("directories")
+            if isinstance(raw_dirs, list):
+                preserved_dirs = [entry for entry in raw_dirs if isinstance(entry, str)]
+
         try:
-            executor.rollback(root)
+            executor.rollback(root, preserved_directories=preserved_dirs)
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
 

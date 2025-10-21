@@ -512,6 +512,31 @@ def test_cli_undo_summary_mode(tmp_path: Path) -> None:
     assert "Rolled back" not in undo_result.output
 
 
+def test_cli_undo_removes_empty_directories(tmp_path: Path) -> None:
+    """Undo should remove directories created during organization when they are empty."""
+
+    root = tmp_path / "undo-cleanup"
+    root.mkdir()
+    original_file = root / "letter.txt"
+    original_file.write_text("hello", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    apply_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert apply_result.exit_code == 0
+
+    destination_dir = root / "documents"
+    destination_file = destination_dir / "letter.txt"
+    assert destination_file.exists()
+
+    undo_result = runner.invoke(cli, ["undo", str(root)], env=env)
+    assert undo_result.exit_code == 0
+
+    assert original_file.exists()
+    assert not destination_dir.exists()
+
+
 def test_cli_status_respects_quiet_default(tmp_path: Path) -> None:
     """Status command should honor the CLI quiet default from configuration."""
 
