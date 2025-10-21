@@ -107,10 +107,9 @@ Stored at `~/.dorgy/config.yaml`
 ```yaml
 # LLM Configuration
 llm:
-  provider: "local"  # local, openai, anthropic
-  model: "llama3"    # for ollama
-  api_base_url: null # optional override for custom gateways
-  api_key: null      # for cloud providers
+  model: "openai/gpt-5"  # Fully qualified <provider>/<model> identifier
+  api_base_url: null     # Optional override for custom gateways
+  api_key: null          # Only required for hosted providers
   temperature: 1.0
   max_tokens: 25000
 
@@ -375,15 +374,15 @@ The project will progress through the following phases. Update the status column
 ## Phase 3 – LLM & DSPy Integration Goals
 
 - Convert `FileDescriptor` outputs into DSPy `FileClassification` and `FileRenaming` signatures, capturing reasoning, tags, and confidence scores.
-- Introduce a provider-agnostic LLM client (local/cloud) with retry/backoff, prompt templates derived from SPEC examples, and caching via the state repository.
+- Introduce an LLM client (local/cloud) that accepts fully qualified `llm.model` strings, supports retry/backoff, derives prompts from SPEC examples, and caches responses via the state repository.
 - Implement low-confidence handling: route items below the ambiguity threshold to `.dorgy/needs-review` and surface them in CLI summaries.
 - Feed organization results back into `StateRepository` (categories, tags, rename suggestions) while preserving rollback data (`orig.json`).
 - Extend CLI (`org`, `watch`, `search`, `mv`) to consume the classification pipeline, including prompt support and JSON/dry-run parity.
 - Expand test coverage with mocked DSPy modules to validate prompt composition, caching, and confidence-based branching.
 
 ### Progress Summary
-- Classification engine now uses DSPy by default; set `DORGY_USE_FALLBACK=1` only for development/testing heuristics, and configuration drives provider/api_base_url with JSON-backed caching.
-- LLM settings now wire provider/api_base_url/model/api_key directly into the DSPy client with defaults of temperature=1.0 and max_tokens=25000 for remote gateways.
+- Classification engine now uses DSPy by default; set `DORGY_USE_FALLBACKS=1` only for development/testing heuristics, and configuration pulls from `llm.model` plus optional API credentials with JSON-backed caching.
+- LLM settings now wire `llm.model` (LiteLLM format) plus optional `api_base_url`/`api_key` directly into the DSPy client with defaults of temperature=1.0 and max_tokens=25000 for remote gateways.
 - CLI `org` runs classification, records categories/tags/confidence, applies rename suggestions when enabled, and routes low-confidence items to review.
 
 ## Phase 4 – Organization Engine Plan
@@ -475,7 +474,7 @@ The project will progress through the following phases. Update the status column
 - Optional Pillow plugins (e.g., `pillow-heif`, `pillow-avif-plugin`, `pillow-avif`, `pillow-jxl`, `pillow-jxl-plugin`) are auto-registered when present so HEIC/AVIF/JPEG XL assets flow through the captioner without additional configuration.
 
 ### Goals
-- Reuse the configured `llm` provider/model for captioning when `process_images` is true by invoking a dedicated DSPy signature that accepts `dspy.Image` inputs; surface clear errors when the model lacks vision capabilities.
+- Reuse the configured `llm.model` for captioning when `process_images` is true by invoking a dedicated DSPy signature that accepts `dspy.Image` inputs; surface clear errors when the model lacks vision capabilities.
 - Extend ingestion to request captions when `process_images` is true, normalize summaries/labels into descriptors (`preview`, `metadata["vision_caption"]`, `tags`), and persist them in the classification cache for reuse.
 - Thread user-provided prompts into caption requests so image summaries respect the same context as text classification.
 - Update classification/organization flows to consume the enriched metadata, adjusting prompts (DSPy) and heuristics so images can be categorized beyond MIME types.
@@ -490,8 +489,8 @@ The project will progress through the following phases. Update the status column
 - Image loading fallbacks rely on Pillow to convert unsupported formats to PNG before invoking DSPy, ensuring HEIC/AVIF/JXL/ICO/BMP assets participate in captioning when the relevant plugins are installed.
 
 ### Risks & Mitigations
-- **Latency/Cost:** Run captioning asynchronously with retry/backoff and enforce per-run limits; provide CLI notes when captions are skipped due to provider errors.
-- **Provider Drift:** Encapsulate provider-specific prompts/response parsing in adapters with unit tests; surface informative errors when API capabilities are missing.
+- **Latency/Cost:** Run captioning asynchronously with retry/backoff and enforce per-run limits; provide CLI notes when captions are skipped due to model errors.
+- **Model Drift:** Encapsulate backend-specific prompts/response parsing in adapters with unit tests; surface informative errors when API capabilities are missing.
 - **Privacy/Security:** Honour `processing.process_images` or CLI flags to opt out per-run and log when files are skipped to aid auditing.
 
 ### Future Work – Image-only PDF OCR Plan

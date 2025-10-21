@@ -69,7 +69,7 @@ def test_decode_tree_payload_returns_none_for_invalid_data() -> None:
 
 
 def test_structure_planner_raises_without_llm_when_fallback_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("DORGY_USE_FALLBACK", "0")
+    monkeypatch.setenv("DORGY_USE_FALLBACKS", "0")
     monkeypatch.setattr("dorgy.classification.structure.dspy", None)
 
     with pytest.raises(LLMUnavailableError):

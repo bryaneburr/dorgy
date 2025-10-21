@@ -145,3 +145,11 @@
 - `uv run pytest` passes locally (79 passed, 1 skipped); next actions: capture a regression fixture from a real organization run to validate the end-to-end tree output once the planner is consistently returning JSON.
 - Enforced DSPy as the default path by raising `LLMUnavailableError` when classification/structure planning runs without the fallback flag and `LLMResponseError` when responses are unusable, propagating rich CLI errors so operators configure credentials instead of silently hitting heuristics.
 - Updated undo flow to prune empty directories created during organization (guarded by the original snapshot directory list) so rollbacks leave the collection tree identical to its pre-org state; added integration coverage under `tests/test_cli_org.py::test_cli_undo_removes_empty_directories`.
+
+## 2025-11-02
+- Refactored LLM configuration to rely solely on a single LiteLLM-style `llm.model` string so DSPy receives the exact identifier without auxiliary provider fields.
+- Tightened fallback behaviour so classification/structure heuristics only execute when `DORGY_USE_FALLBACKS=1`; runtime errors now bubble immediately when fallbacks are disabled.
+- Updated DSPy wiring to avoid injecting placeholder API credentials, refreshed README/SPEC/ARCH/AGENTS guidance, and renamed the fallback environment variable across tests and docs.
+- Swapped the default model to `openai/gpt-5`, updating tests/docs to match and keeping local gateway examples pointed at `ollama/<model>` where appropriate.
+- Surfaced `context.llm` metadata and an LLM summary line in `dorgy org`/`watch` outputs so operators can audit which model and parameters produced a run.
+- Next actions: run `uv run pytest` after final cleanup, validate CLI error messaging for misconfigured `llm.model` values, and determine whether migration tooling should warn users with legacy configs.

@@ -88,19 +88,18 @@ All commands accept `--json` for machine-readable output and share standardized 
 - `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation. Automatic renaming is disabled by default (`organization.rename_files: false`) so classification runs remain non-destructive unless you opt in.
 - `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (future releases will also surface search defaults).
 - Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
-- DSPy providers are configured through the `llm` block. Set `DORGY_USE_FALLBACK=1` to force the heuristic classifier during local testing.
+- LLM models are configured through the `llm` block. The default target is `openai/gpt-5`; provide any LiteLLM-compatible identifier (for example `openai/gpt-4o-mini` or `openrouter/gpt-4o-mini:free`) via `llm.model`, supply `llm.api_key`/`llm.api_base_url` when required, and set `DORGY_USE_FALLBACKS=1` only when explicitly exercising heuristic classifiers in development.
 
-### LLM Provider Configuration
+### LLM Model Configuration
 
-Configure language models through the `llm` block using `uv run dorgy config set llm.<field> <value>` or by editing `~/.dorgy/config.yaml`. The CLI also respects environment variables such as `DORGY__LLM__PROVIDER`, `DORGY__LLM__MODEL`, `DORGY__LLM__API_KEY`, and `DORGY__LLM__API_BASE_URL`.
+Configure language models through the `llm` block using `uv run dorgy config set llm.<field> <value>` or by editing `~/.dorgy/config.yaml`. Supply the exact LiteLLM/DSPy model string (``<provider>/<model>[:variant]``) via `llm.model`. The CLI also respects environment variables such as `DORGY__LLM__MODEL`, `DORGY__LLM__API_KEY`, and `DORGY__LLM__API_BASE_URL`.
 
-Common provider setups (substitute your own model names and API keys as needed):
+Common configurations (substitute your own model identifiers and credentials as needed):
 
 - **OpenAI**
 
   ```bash
-  uv run dorgy config set llm.provider openai
-  uv run dorgy config set llm.model gpt-4o
+  uv run dorgy config set llm.model openai/gpt-4o
   uv run dorgy config set llm.api_key "$OPENAI_API_KEY"
   ```
 
@@ -108,40 +107,35 @@ Common provider setups (substitute your own model names and API keys as needed):
 
   ```yaml
   llm:
-    provider: openai
-    model: gpt-4o
+    model: openai/gpt-4o
     api_key: sk-...
   ```
 
 - **Anthropic**
 
   ```bash
-  uv run dorgy config set llm.provider anthropic
-  uv run dorgy config set llm.model claude-3-5-sonnet-20240620
+  uv run dorgy config set llm.model anthropic/claude-3-5-sonnet-20240620
   uv run dorgy config set llm.api_key "$ANTHROPIC_API_KEY"
   ```
 
-- **xAI (Grok)**
+- **xAI (Grok) via OpenRouter**
 
   ```bash
-  uv run dorgy config set llm.provider xai
-  uv run dorgy config set llm.model grok-beta
-  uv run dorgy config set llm.api_key "$XAI_API_KEY"
+  uv run dorgy config set llm.model openrouter/grok-1
+  uv run dorgy config set llm.api_key "$OPENROUTER_API_KEY"
   ```
 
 - **Google Gemini**
 
   ```bash
-  uv run dorgy config set llm.provider google
-  uv run dorgy config set llm.model gemini-1.5-pro
+  uv run dorgy config set llm.model google/gemini-1.5-pro
   uv run dorgy config set llm.api_key "$GOOGLE_API_KEY"
   ```
 
 - **Local / Custom Gateway**
 
   ```bash
-  uv run dorgy config set llm.provider local
-  uv run dorgy config set llm.model llama3
+  uv run dorgy config set llm.model ollama/llama3
   uv run dorgy config set llm.api_base_url http://localhost:11434/v1
   ```
 

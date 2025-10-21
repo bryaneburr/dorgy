@@ -17,20 +17,45 @@ class LLMSettings(DorgyBaseModel):
     """LLM configuration options.
 
     Attributes:
-        provider: Identifier for the language-model provider.
-        model: Model name to target when issuing requests.
-        api_base_url: Optional override for the base URL when targeting custom gateways.
+        model: Fully-qualified model identifier accepted by LiteLLM/DSPy (e.g.,
+            ``"openrouter/gpt-4o-mini"`` or ``"openai/gpt-4o:latest"``).
+        api_base_url: Optional override for custom gateways or proxies.
         temperature: Sampling temperature for generative calls.
         max_tokens: Maximum number of tokens in responses.
-        api_key: Optional credential for hosted providers.
+        api_key: Optional credential supplied to DSPy when required by the backend.
     """
 
-    provider: str = "local"
-    model: str = "llama3"
+    model: str = "openai/gpt-5"
     api_base_url: Optional[str] = None
     temperature: float = 1.0
     max_tokens: int = 25_000
     api_key: Optional[str] = None
+
+    def runtime_metadata(self) -> dict[str, object]:
+        """Return sanitized runtime metadata suitable for logs and JSON payloads."""
+
+        metadata: dict[str, object] = {
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if self.api_base_url:
+            metadata["api_base_url"] = self.api_base_url
+        metadata["api_key_configured"] = bool(self.api_key)
+        return metadata
+
+    def runtime_summary(self) -> str:
+        """Return a human-readable summary of the runtime LLM configuration."""
+
+        parts = [
+            f"model={self.model}",
+            f"temperature={self.temperature:.2f}",
+            f"max_tokens={self.max_tokens}",
+        ]
+        if self.api_base_url:
+            parts.append(f"api_base_url={self.api_base_url}")
+        parts.append("api_key=provided" if self.api_key else "api_key=not-set")
+        return ", ".join(parts)
 
 
 class ProcessingOptions(DorgyBaseModel):

@@ -98,10 +98,11 @@ def test_flatten_for_env_round_trips_defaults() -> None:
     """Verify flatten_for_env produces expected defaults."""
     flat = flatten_for_env(DorgyConfig())
 
-    assert flat["DORGY__LLM__PROVIDER"] == "local"
+    assert flat["DORGY__LLM__MODEL"] == "openai/gpt-5"
     assert flat["DORGY__LLM__TEMPERATURE"] == "1.0"
     assert flat["DORGY__LLM__MAX_TOKENS"] == "25000"
     assert flat["DORGY__LLM__API_BASE_URL"] == "null"
+    assert "DORGY__LLM__PROVIDER" not in flat
     assert flat["DORGY__PROCESSING__MAX_FILE_SIZE_MB"] == "100"
     assert flat["DORGY__CLI__QUIET_DEFAULT"] == "False"
     assert flat["DORGY__CLI__SUMMARY_DEFAULT"] == "False"
@@ -121,6 +122,7 @@ def test_llm_defaults_updated() -> None:
     """Ensure new LLM defaults are reflected in the configuration."""
 
     settings = DorgyConfig().llm
+    assert settings.model == "openai/gpt-5"
     assert settings.temperature == pytest.approx(1.0)
     assert settings.max_tokens == 25_000
     assert settings.api_base_url is None

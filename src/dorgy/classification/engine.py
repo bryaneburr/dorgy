@@ -2,8 +2,9 @@
 
 This module exposes a thin wrapper around DSPy programs so the rest of the
 codebase can request classifications without depending directly on DSPy.
-When DSPy is unavailable, the engine falls back to lightweight heuristics so
-we can still exercise the higher-level pipeline in development and tests.
+When DSPy is unavailable, the engine falls back to lightweight heuristics only
+when ``DORGY_USE_FALLBACKS=1`` so we can still exercise the higher-level
+pipeline in development and tests.
 """
 
 from __future__ import annotations
@@ -47,25 +48,32 @@ _CATEGORY_ALIASES = {
 class ClassificationEngine:
     """Apply DSPy programs to classify and rename files.
 
-    The engine prefers DSPy when available, but automatically falls back to
-    heuristic classification so development and tests can proceed without the
-    optional dependency.
+    The engine prefers DSPy when available, but only falls back to heuristic
+    classification when ``DORGY_USE_FALLBACKS=1`` so development and tests can
+    proceed without the optional dependency.
     """
 
     def __init__(self, settings: Optional[LLMSettings] = None) -> None:
-        use_fallback = os.getenv("DORGY_USE_FALLBACK") == "1"
+        legacy_flag = os.getenv("DORGY_USE_FALLBACK")
+        if legacy_flag is not None:
+            LOGGER.warning(
+                "DORGY_USE_FALLBACK is deprecated; set DORGY_USE_FALLBACKS=1 to enable heuristics."
+            )
+
+        use_fallback = os.getenv("DORGY_USE_FALLBACKS") == "1"
         self._settings = settings or LLMSettings()
+        self._use_fallbacks = use_fallback
 
         if use_fallback:
             self._has_dspy = False
             self._program = None
-            LOGGER.info("Heuristic fallback enabled by DORGY_USE_FALLBACK=1.")
+            LOGGER.info("Heuristic fallback enabled by DORGY_USE_FALLBACKS=1.")
             return
 
         if dspy is None:
             raise LLMUnavailableError(
                 "DSPy is not installed. Install the `dspy` package (and any provider-specific "
-                "dependencies), or set DORGY_USE_FALLBACK=1 to enable the heuristic classifier."
+                "dependencies), or set DORGY_USE_FALLBACKS=1 to enable the heuristic classifier."
             )
 
         configure_dspy_logging()
@@ -153,18 +161,7 @@ class ClassificationEngine:
             worker_id = _worker_id()
             _notify_progress(index, request, worker_id, "start", None, None)
             try:
-                if self._has_dspy and self._program is not None:
-                    decision = self._classify_with_dspy(request)
-                else:
-                    decision = self._fallback_classify(request)
-                duration = time.perf_counter() - start
-                LOGGER.debug(
-                    "Classification completed for %s in %.2fs",
-                    request.descriptor.path,
-                    duration,
-                )
-                _notify_progress(index, request, worker_id, "complete", duration, None)
-                return index, decision, None
+                decision = self._classify_request(request)
             except Exception as exc:  # pragma: no cover - defensive safeguard
                 duration = time.perf_counter() - start
                 LOGGER.warning(
@@ -174,7 +171,21 @@ class ClassificationEngine:
                     exc,
                 )
                 _notify_progress(index, request, worker_id, "complete", duration, exc)
-                return index, None, f"{request.descriptor.path}: {exc}"
+                if not self._use_fallbacks or isinstance(exc, LLMUnavailableError):
+                    raise
+                LOGGER.info(
+                    "Falling back to heuristic classification for %s after DSPy failure.",
+                    request.descriptor.path,
+                )
+                decision = self._fallback_classify(request)
+            duration = time.perf_counter() - start
+            LOGGER.debug(
+                "Classification completed for %s in %.2fs",
+                request.descriptor.path,
+                duration,
+            )
+            _notify_progress(index, request, worker_id, "complete", duration, None)
+            return index, decision, None
 
         if worker_count == 1:
             for idx, request in enumerate(requests):
@@ -259,6 +270,20 @@ class ClassificationEngine:
     # Internal helpers                                                   #
     # ------------------------------------------------------------------ #
 
+    def _classify_request(self, request: ClassificationRequest) -> ClassificationDecision:
+        """Return a classification decision using DSPy or heuristics."""
+
+        if self._has_dspy and self._program is not None:
+            return self._classify_with_dspy(request)
+
+        if self._use_fallbacks:
+            return self._fallback_classify(request)
+
+        raise LLMUnavailableError(
+            "Heuristic fallbacks are disabled. Set DORGY_USE_FALLBACKS=1 to allow heuristics when "
+            "the configured language model cannot be used."
+        )
+
     def _configure_language_model(self) -> None:
         """Configure the DSPy language model according to LLM settings."""
         default_settings = LLMSettings()
@@ -266,33 +291,14 @@ class ClassificationEngine:
             [
                 self._settings.api_base_url,
                 self._settings.api_key,
-                self._settings.provider != default_settings.provider,
                 self._settings.model != default_settings.model,
             ]
         )
         if not configured:
             raise LLMUnavailableError(
                 "LLM configuration is incomplete. Update ~/.dorgy/config.yaml with valid values "
-                "for the llm block (provider/model/api_key or api_base_url), or set "
-                "DORGY_USE_FALLBACK=1 to force the heuristic classifier."
-            )
-
-        api_key_missing = self._settings.api_key is None
-
-        if self._settings.api_base_url and api_key_missing:
-            # Local gateways (e.g., Ollama) don't require authentication, so supply an empty string.
-            self._settings.api_key = ""
-            api_key_missing = False
-
-        if (
-            self._settings.provider
-            and self._settings.provider != "local"
-            and self._settings.api_base_url is None
-            and api_key_missing
-        ):
-            raise LLMUnavailableError(
-                "llm.provider is set to a remote provider but llm.api_key is missing. Provide the "
-                "API key or set DORGY_USE_FALLBACK=1 to use the heuristic classifier."
+                "for the llm block (model/api_key/api_base_url), or set "
+                "DORGY_USE_FALLBACKS=1 to force the heuristic classifier."
             )
 
         lm_kwargs: dict[str, object] = {
@@ -303,10 +309,7 @@ class ClassificationEngine:
 
         if self._settings.api_base_url:
             lm_kwargs["api_base"] = self._settings.api_base_url
-        elif self._settings.provider:
-            lm_kwargs["provider"] = self._settings.provider
-
-        if self._settings.api_key is not None:
+        if self._settings.api_key is not None and self._settings.api_key != "":
             lm_kwargs["api_key"] = self._settings.api_key
 
         try:
@@ -315,7 +318,7 @@ class ClassificationEngine:
         except Exception as exc:  # pragma: no cover - DSPy misconfiguration
             raise LLMUnavailableError(
                 "Unable to configure the DSPy language model. Verify your llm.* settings "
-                "(provider/model/api_key/api_base_url) or set DORGY_USE_FALLBACK=1 to use the "
+                "(model/api_key/api_base_url) or set DORGY_USE_FALLBACKS=1 to use the "
                 "heuristic classifier."
             ) from exc
 

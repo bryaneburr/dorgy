@@ -53,7 +53,7 @@ def test_fallback_handles_unknown_types() -> None:
 
 
 def test_engine_raises_without_fallback_when_llm_missing(monkeypatch) -> None:
-    monkeypatch.setenv("DORGY_USE_FALLBACK", "0")
+    monkeypatch.setenv("DORGY_USE_FALLBACKS", "0")
     monkeypatch.setattr("dorgy.classification.engine.dspy", None)
 
     with pytest.raises(LLMUnavailableError):

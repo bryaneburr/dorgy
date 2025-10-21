@@ -673,6 +673,12 @@ class WatchService:
                 )
                 notes.append(dryrun_message)
 
+        llm_metadata = self._config.llm.runtime_metadata()
+        fallbacks_enabled = os.getenv("DORGY_USE_FALLBACKS") == "1"
+        llm_metadata["fallbacks_enabled"] = fallbacks_enabled
+        fallback_text = "enabled" if fallbacks_enabled else "disabled"
+        llm_metadata["summary"] = f"{self._config.llm.runtime_summary()}, fallbacks={fallback_text}"
+
         json_payload: dict[str, Any] = {
             "context": {
                 "batch_id": batch_id,
@@ -693,6 +699,7 @@ class WatchService:
             "removals": removals_payload,
             "suppressed_deletions": suppressed_payload,
         }
+        json_payload["context"]["llm"] = llm_metadata
 
         if self._dry_run:
             batch_completed_at = datetime.now(timezone.utc)

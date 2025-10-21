@@ -37,27 +37,33 @@ class StructurePlanner:
     """Use an LLM to propose a nested destination tree for descriptors."""
 
     def __init__(self, settings: Optional[LLMSettings] = None) -> None:
-        use_fallback = os.getenv("DORGY_USE_FALLBACK") == "1"
+        legacy_flag = os.getenv("DORGY_USE_FALLBACK")
+        if legacy_flag is not None:
+            LOGGER.warning(
+                "DORGY_USE_FALLBACK is deprecated; set DORGY_USE_FALLBACKS=1 to enable heuristics."
+            )
+
+        use_fallback = os.getenv("DORGY_USE_FALLBACKS") == "1"
         self._settings = settings or LLMSettings()
         self._use_fallback = use_fallback
         self._enabled = False
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
 
         if use_fallback:
-            LOGGER.info("Structure planner fallback enabled by DORGY_USE_FALLBACK=1.")
+            LOGGER.info("Structure planner fallback enabled by DORGY_USE_FALLBACKS=1.")
             return
 
         if dspy is None:
             raise LLMUnavailableError(
                 "Structure planner requires DSPy. Install the `dspy` package or set "
-                "DORGY_USE_FALLBACK=1 to use heuristic structure placement."
+                "DORGY_USE_FALLBACKS=1 to use heuristic structure placement."
             )
 
         configure_dspy_logging()
         self._configure_language_model()
         self._program = dspy.Predict(FileTreeSignature)
         self._enabled = True
-        LOGGER.debug("Structure planner initialised with LLM provider %s.", self._settings.provider)
+        LOGGER.debug("Structure planner initialised with LLM model %s.", self._settings.model)
 
     def _configure_language_model(self) -> None:
         if dspy is None:  # pragma: no cover
@@ -68,28 +74,11 @@ class StructurePlanner:
             [
                 self._settings.api_base_url,
                 self._settings.api_key,
-                self._settings.provider != default_settings.provider,
                 self._settings.model != default_settings.model,
             ]
         )
         if not configured:
             LOGGER.debug("Structure planner using default local LLM configuration.")
-
-        api_key_missing = self._settings.api_key is None
-
-        if self._settings.api_base_url and api_key_missing:
-            self._settings.api_key = ""
-            api_key_missing = False
-
-        if (
-            self._settings.provider
-            and self._settings.provider != "local"
-            and self._settings.api_base_url is None
-            and api_key_missing
-        ):
-            raise LLMUnavailableError(
-                "Structure planner requires llm.api_key when using a remote provider."
-            )
 
         lm_kwargs: dict[str, object] = {
             "model": self._settings.model,
@@ -98,9 +87,7 @@ class StructurePlanner:
         }
         if self._settings.api_base_url:
             lm_kwargs["api_base"] = self._settings.api_base_url
-        elif self._settings.provider:
-            lm_kwargs["provider"] = self._settings.provider
-        if self._settings.api_key is not None:
+        if self._settings.api_key is not None and self._settings.api_key != "":
             lm_kwargs["api_key"] = self._settings.api_key
 
         try:
@@ -108,7 +95,7 @@ class StructurePlanner:
         except Exception as exc:  # pragma: no cover - DSPy misconfiguration
             raise LLMUnavailableError(
                 "Unable to configure the DSPy language model for structure planning. "
-                "Verify your llm.* settings (provider/model/api_key/api_base_url)."
+                "Verify your llm.* settings (model/api_key/api_base_url)."
             ) from exc
         dspy.settings.configure(lm=language_model)
 
@@ -203,7 +190,7 @@ class StructurePlanner:
         if not tree_json:
             LOGGER.debug("Structure planner returned empty tree response.")
             raise LLMResponseError(
-                "Structure planner returned an empty response; enable DORGY_USE_FALLBACK=1 to "
+                "Structure planner returned an empty response; enable DORGY_USE_FALLBACKS=1 to "
                 "continue with heuristic structure placement."
             )
 
@@ -245,7 +232,7 @@ class StructurePlanner:
             )
             raise LLMResponseError(
                 "Structure planner did not produce destinations for any files. "
-                "Verify the configured LLM settings or set DORGY_USE_FALLBACK=1 to use heuristics."
+                "Verify the configured LLM settings or set DORGY_USE_FALLBACKS=1 to use heuristics."
             )
 
         LOGGER.debug("Structure planner produced destinations for %d file(s).", len(mapping))
