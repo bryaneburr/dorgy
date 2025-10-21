@@ -57,7 +57,7 @@ except ImportError:  # pragma: no cover - executed when Pillow missing
 class MetadataExtractor:
     """Extract structured metadata and previews for a file."""
 
-    _DOC_PREVIEW_CHAR_LIMIT = 512
+    _DEFAULT_PREVIEW_CHAR_LIMIT = 2048
     _DOC_PREVIEW_MAX_PAGES = 3
 
     _DOC_MIME_MAP = {
@@ -73,13 +73,24 @@ class MetadataExtractor:
         "text/html": "html",
     }
 
-    def __init__(self) -> None:
-        """Initialise the metadata extractor and supporting converters."""
+    def __init__(self, preview_char_limit: int | None = None) -> None:
+        """Initialise the metadata extractor and supporting converters.
+
+        Args:
+            preview_char_limit: Maximum number of characters to retain in previews. When
+                omitted, a sensible default is applied.
+        """
 
         self._docling_converter: Any | None = None
         self._docling_lock = threading.Lock()
         self._docling_preview_cache: dict[Path, str] = {}
         self._docling_enabled: bool = DocumentConverter is not None
+        limit = (
+            preview_char_limit
+            if preview_char_limit is not None and preview_char_limit > 0
+            else self._DEFAULT_PREVIEW_CHAR_LIMIT
+        )
+        self._preview_char_limit = limit
 
     def extract(
         self, path: Path, mime_type: str, sample_limit: int | None = None
@@ -106,11 +117,17 @@ class MetadataExtractor:
             "mime_type": mime_type,
         }
 
+        effective_preview_limit = (
+            min(sample_limit, self._preview_char_limit)
+            if sample_limit
+            else self._preview_char_limit
+        )
+        metadata["preview_limit_characters"] = str(effective_preview_limit)
+
         if mime_type.startswith("text") or mime_type in {"application/json", "application/xml"}:
-            limit = sample_limit or 2048
             try:
                 with path.open("r", encoding="utf-8", errors="replace") as fh:
-                    sample = fh.read(limit)
+                    sample = fh.read(effective_preview_limit)
             except OSError:
                 sample = ""
             if sample:
@@ -163,7 +180,11 @@ class MetadataExtractor:
             Optional[str]: Preview text when available, otherwise None.
         """
         if mime_type.startswith("text") or mime_type in {"application/json", "application/xml"}:
-            limit = min(sample_limit, 512) if sample_limit else 512
+            limit = (
+                min(sample_limit, self._preview_char_limit)
+                if sample_limit
+                else self._preview_char_limit
+            )
             try:
                 with path.open("r", encoding="utf-8", errors="replace") as fh:
                     snippet = fh.read(limit).strip()
@@ -173,9 +194,9 @@ class MetadataExtractor:
         cached = self._docling_preview_cache.pop(path, None)
         if cached:
             limit = (
-                min(sample_limit, self._DOC_PREVIEW_CHAR_LIMIT)
+                min(sample_limit, self._preview_char_limit)
                 if sample_limit
-                else self._DOC_PREVIEW_CHAR_LIMIT
+                else self._preview_char_limit
             )
             return cached[:limit].strip() or None
 
@@ -246,9 +267,9 @@ class MetadataExtractor:
             return metadata, None
 
         limit = (
-            min(sample_limit, self._DOC_PREVIEW_CHAR_LIMIT)
+            min(sample_limit, self._preview_char_limit)
             if sample_limit
-            else self._DOC_PREVIEW_CHAR_LIMIT
+            else self._preview_char_limit
         )
         snippet = preview_text.strip()[:limit].strip()
         return metadata, snippet or None

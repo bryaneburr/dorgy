@@ -956,7 +956,7 @@ def org(
             scanner=scanner,
             detector=TypeDetectorCls(),
             hasher=HashComputerCls(),
-            extractor=MetadataExtractorCls(),
+            extractor=MetadataExtractorCls(preview_char_limit=config.processing.preview_char_limit),
             processing=config.processing,
             staging_dir=staging_dir,
             allow_writes=not dry_run,

@@ -366,7 +366,7 @@ The project will progress through the following phases. Update the status column
 
 ### Progress Summary
 - Directory scanning honours hidden/symlink/size policies and flags oversized files for sampling.
-- Metadata extraction captures text/json previews, image EXIF data, and records when sampling/truncation occurs.
+- Metadata extraction captures text/json previews, image EXIF data, and respects the configurable `processing.preview_char_limit` (default 2048) while recording truncation metadata (`preview_limit_characters`, sampled character counts).
 - Locked file handling supports skip/wait/copy actions; copy operations stage files safely before cleanup.
 - Corrupted files respect the `quarantine` policy, with CLI feedback and state/log updates.
 - `dorgy org` now wires the ingestion pipeline, dry-run preview, JSON output, and state persistence.

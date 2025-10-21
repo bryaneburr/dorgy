@@ -491,7 +491,9 @@ class WatchService:
                 scanner=scanner,
                 detector=TypeDetector(),
                 hasher=HashComputer(),
-                extractor=MetadataExtractor(),
+                extractor=MetadataExtractor(
+                    preview_char_limit=self._config.processing.preview_char_limit
+                ),
                 processing=self._config.processing,
                 staging_dir=staging_dir,
                 allow_writes=not self._dry_run,

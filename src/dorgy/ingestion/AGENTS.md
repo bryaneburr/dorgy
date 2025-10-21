@@ -5,3 +5,4 @@
 - Expensive IO/LLM hand-offs belong after ingestion; keep this package focused on fast metadata extraction and flagging (`needs_review`, `quarantined`).
 - Update/add tests in `tests/test_ingestion_pipeline.py` when extending pipeline behaviors or adding new adapters to ensure deterministic previews/metadata.
 - Locked file policies (`copy|skip|wait`) and corrupted handling (`quarantine|skip`) are implemented inside `IngestionPipeline`; if you change these semantics, update staging/quarantine interactions and CLI tests.
+- `MetadataExtractor` accepts a `preview_char_limit` parameter that should be sourced from config (`processing.preview_char_limit`) so descriptors, watch batches, and classifiers share consistent context lengths; metadata always surfaces the effective limit under `preview_limit_characters`.

@@ -66,7 +66,7 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
         ),
         detector=TypeDetector(),
         hasher=HashComputer(),
-        extractor=MetadataExtractor(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
         processing=processing,
     )
 
@@ -81,14 +81,46 @@ def test_ingestion_pipeline_generates_descriptors(tmp_path: Path) -> None:
     assert text_desc.preview is not None and "first line" in text_desc.preview
     assert text_desc.metadata["size_bytes"] == str(file_path.stat().st_size)
     assert text_desc.metadata.get("sampled_lines") == "2"
+    assert text_desc.metadata["preview_limit_characters"] == str(processing.preview_char_limit)
 
     image_desc = descriptors["image.png"]
     assert image_desc.mime_type.startswith("image/")
     assert image_desc.metadata["image_width"] == "32"
     assert image_desc.metadata["image_height"] == "16"
+    assert image_desc.metadata["preview_limit_characters"] == str(processing.preview_char_limit)
 
     assert not result.needs_review
     assert not result.errors
+
+
+def test_ingestion_pipeline_respects_preview_limit(tmp_path: Path) -> None:
+    """Ensure preview truncation honours the configured character limit."""
+
+    long_file = tmp_path / "long.txt"
+    long_file.write_text("A" * 5000, encoding="utf-8")
+
+    processing = ProcessingOptions(preview_char_limit=256)
+    pipeline = IngestionPipeline(
+        scanner=DirectoryScanner(
+            recursive=False,
+            include_hidden=True,
+            follow_symlinks=False,
+            max_size_bytes=None,
+        ),
+        detector=TypeDetector(),
+        hasher=HashComputer(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
+        processing=processing,
+    )
+
+    result = pipeline.run([tmp_path])
+
+    assert len(result.processed) == 1
+    descriptor = result.processed[0]
+    assert descriptor.preview is not None
+    assert len(descriptor.preview) == processing.preview_char_limit
+    assert descriptor.metadata["sampled_characters"] == str(processing.preview_char_limit)
+    assert descriptor.metadata["preview_limit_characters"] == str(processing.preview_char_limit)
 
 
 def test_ingestion_pipeline_enriches_images_with_captions(tmp_path: Path) -> None:
@@ -130,7 +162,7 @@ def test_ingestion_pipeline_enriches_images_with_captions(tmp_path: Path) -> Non
         ),
         detector=TypeDetector(),
         hasher=HashComputer(),
-        extractor=MetadataExtractor(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
         processing=processing,
         vision_captioner=captioner,  # type: ignore[arg-type]
     )
@@ -144,6 +176,7 @@ def test_ingestion_pipeline_enriches_images_with_captions(tmp_path: Path) -> Non
     assert descriptor.metadata["vision_labels"] == "Artwork, Blue"
     assert descriptor.metadata["vision_confidence"] == "0.873"
     assert descriptor.metadata["vision_reasoning"] == "Synthetic test caption."
+    assert descriptor.metadata["preview_limit_characters"] == str(processing.preview_char_limit)
     assert captioner.calls[0][2] == "Highlight receipts"
     # Ensure labels are merged into tags alongside the MIME-derived category.
     assert "Artwork" in descriptor.tags
@@ -170,7 +203,7 @@ def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
         ),
         detector=TypeDetector(),
         hasher=HashComputer(),
-        extractor=MetadataExtractor(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
         processing=processing,
     )
 
@@ -179,6 +212,7 @@ def test_ingestion_pipeline_sampling(tmp_path: Path) -> None:
     descriptor = result.processed[0]
     assert descriptor.metadata.get("oversized") == "true"
     assert descriptor.metadata.get("sample_limit") == str(processing.sample_size_mb * 1024 * 1024)
+    assert descriptor.metadata["preview_limit_characters"] == str(processing.preview_char_limit)
 
 
 def test_ingestion_pipeline_quarantines_on_error(tmp_path: Path) -> None:
@@ -260,7 +294,7 @@ def test_ingestion_pipeline_skips_locked_files(tmp_path: Path) -> None:
         scanner=LockedScanner(),
         detector=TypeDetector(),
         hasher=HashComputer(),
-        extractor=MetadataExtractor(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
         processing=processing,
     )
 
@@ -300,7 +334,7 @@ def test_ingestion_pipeline_copies_locked_files(tmp_path: Path) -> None:
         scanner=LockedScanner(),
         detector=TypeDetector(),
         hasher=HashComputer(),
-        extractor=MetadataExtractor(),
+        extractor=MetadataExtractor(preview_char_limit=processing.preview_char_limit),
         processing=processing,
         staging_dir=staging_dir,
     )
