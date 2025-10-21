@@ -104,6 +104,7 @@ def test_cli_org_dry_run(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["org", str(root), "--dry-run"], env=env)
 
     assert result.exit_code == 0
+    assert "LLM configuration:" in result.output
     assert "Dry run" in result.output
     assert not (root / ".dorgy").exists()
 

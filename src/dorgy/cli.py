@@ -7,10 +7,11 @@ import fnmatch
 import importlib
 import json
 import logging
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, cast
+from typing import TYPE_CHECKING, Any, Iterable, Mapping, cast
 
 import click
 import yaml
@@ -104,6 +105,47 @@ def _load_dependency(name: str, module: str, attr: str) -> Any:
 
 console = Console()
 LOGGER = logging.getLogger(__name__)
+
+
+def _collect_llm_metadata(settings: Any) -> dict[str, Any]:
+    """Return sanitized LLM metadata including fallback state and summary text."""
+
+    metadata = settings.runtime_metadata()
+    fallbacks_enabled = os.getenv("DORGY_USE_FALLBACKS") == "1"
+    metadata["fallbacks_enabled"] = fallbacks_enabled
+    fallback_text = "enabled" if fallbacks_enabled else "disabled"
+    metadata["summary"] = f"{settings.runtime_summary()}, fallbacks={fallback_text}"
+    return metadata
+
+
+def _llm_summary(metadata: Mapping[str, Any]) -> str:
+    """Render a human-readable LLM summary from serialized metadata."""
+
+    summary = metadata.get("summary")
+    if isinstance(summary, str):
+        return summary
+
+    parts: list[str] = []
+    model = metadata.get("model")
+    if model:
+        parts.append(f"model={model}")
+    temperature = metadata.get("temperature")
+    if temperature is not None:
+        parts.append(f"temperature={float(temperature):.2f}")
+    max_tokens = metadata.get("max_tokens")
+    if max_tokens is not None:
+        parts.append(f"max_tokens={max_tokens}")
+    api_base_url = metadata.get("api_base_url")
+    if api_base_url:
+        parts.append(f"api_base_url={api_base_url}")
+    if metadata.get("api_key_configured"):
+        parts.append("api_key=provided")
+    else:
+        parts.append("api_key=not-set")
+    fallback = metadata.get("fallbacks_enabled")
+    if fallback is not None:
+        parts.append(f"fallbacks={'enabled' if fallback else 'disabled'}")
+    return ", ".join(parts)
 
 
 class _ProgressTask:
@@ -339,6 +381,15 @@ def _emit_watch_batch(
         return
 
     trigger_count = len(batch.triggered_paths)
+    llm_context = batch.json_payload.get("context", {}).get("llm")  # type: ignore[arg-type]
+    if llm_context and not summary_only:
+        _emit_message(
+            f"[cyan]LLM configuration: {_llm_summary(llm_context)}[/cyan]",
+            mode="detail",
+            quiet=quiet,
+            summary_only=summary_only,
+        )
+
     if trigger_count and not summary_only:
         _emit_message(
             f"[cyan]Watch batch {batch.json_payload['context']['batch_id']} "
@@ -1168,6 +1219,7 @@ def org(
                 )
             )
 
+        llm_metadata = _collect_llm_metadata(config.llm)
         counts = compute_org_counts(result, classification_batch, plan)
         json_payload: dict[str, Any] = {
             "context": {
@@ -1182,6 +1234,7 @@ def org(
             "files": file_entries,
             "notes": list(plan.notes),
         }
+        json_payload["context"]["llm"] = llm_metadata
         json_payload["errors"] = collect_error_payload(result, classification_batch)
 
         if json_output and dry_run:
@@ -1205,6 +1258,14 @@ def org(
             for row in table_rows:
                 table.add_row(*row)
             _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)
+
+            llm_summary_text = _llm_summary(llm_metadata)
+            _emit_message(
+                f"[cyan]LLM configuration: {llm_summary_text}[/cyan]",
+                mode="detail",
+                quiet=quiet_enabled,
+                summary_only=summary_only,
+            )
 
             tree_output = _render_tree(final_path_map.values(), target_root)
             if tree_output:

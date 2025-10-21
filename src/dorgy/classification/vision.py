@@ -206,7 +206,6 @@ class VisionCaptioner:
             [
                 self._settings.api_base_url,
                 self._settings.api_key,
-                self._settings.provider != default_settings.provider,
                 self._settings.model != default_settings.model,
             ]
         )
@@ -214,26 +213,7 @@ class VisionCaptioner:
             raise RuntimeError(
                 (
                     "Vision captioning requires an explicitly configured LLM. "
-                    "Update your configuration with a provider/model that supports images."
-                )
-            )
-
-        api_key_missing = self._settings.api_key is None
-
-        if self._settings.api_base_url and api_key_missing:
-            self._settings.api_key = ""
-            api_key_missing = False
-
-        if (
-            self._settings.provider
-            and self._settings.provider != "local"
-            and self._settings.api_base_url is None
-            and api_key_missing
-        ):
-            raise RuntimeError(
-                (
-                    "An API key is required for the configured vision provider. "
-                    "Update `llm.api_key` or disable process_images."
+                    "Update your configuration with an LLM model that supports images."
                 )
             )
 
@@ -245,10 +225,7 @@ class VisionCaptioner:
 
         if self._settings.api_base_url:
             lm_kwargs["api_base"] = self._settings.api_base_url
-        elif self._settings.provider:
-            lm_kwargs["provider"] = self._settings.provider
-
-        if self._settings.api_key is not None:
+        if self._settings.api_key is not None and self._settings.api_key != "":
             lm_kwargs["api_key"] = self._settings.api_key
 
         try:

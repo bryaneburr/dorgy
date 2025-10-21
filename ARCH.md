@@ -44,7 +44,7 @@ The pipeline discovers files, filters by size/hidden/locking rules, computes has
 
 ### Classification (`src/dorgy/classification/`)
 
-Wraps DSPy programs and language model coordination. `engine.py` houses `ClassificationEngine` with optional DSPy dependencies and fallback heuristics controlled by `DORGY_USE_FALLBACK`. `models.py` defines requests/decisions/batches; `exceptions.py` provides typed errors; `cache.py` and `vision.py` manage JSON caches for decisions and captions. `structure.py` computes destination folder recommendations, and `dspy_logging.py` scopes DSPy logging for reproducibility.
+Wraps DSPy programs and language model coordination. `engine.py` houses `ClassificationEngine` with optional DSPy dependencies and fallback heuristics gated by `DORGY_USE_FALLBACKS`. `models.py` defines requests/decisions/batches; `exceptions.py` provides typed errors; `cache.py` and `vision.py` manage JSON caches for decisions and captions. `structure.py` computes destination folder recommendations, and `dspy_logging.py` scopes DSPy logging for reproducibility. `LLMSettings` consumes LiteLLM-style `llm.model` strings as the sole identifier for remote or local backends, and the CLI surfaces the active LLM metadata (model, parameters, fallback state) in both human and JSON outputs for auditing.
 
 ### Organization (`src/dorgy/organization/`)
 

@@ -76,6 +76,8 @@ def test_cli_watch_once_json(tmp_path: Path) -> None:
     batch = payload["batches"][0]
     assert batch["counts"]["processed"] == 1
     assert batch["context"]["source_root"].endswith("json")
+    assert batch["context"]["llm"]["model"]
+    assert "summary" in batch["context"]["llm"]
 
 
 def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
@@ -219,6 +221,7 @@ def test_watch_move_within_updates_state_without_opt_in(tmp_path: Path) -> None:
     assert batch is not None
     assert batch.counts["deletes"] == 1
     assert not batch.suppressed_deletions
+    assert batch.json_payload["context"]["llm"]["model"]
     removals = batch.json_payload["removals"]
     assert removals and removals[0]["kind"] == "moved_within"
     new_paths = _state_paths(root)
@@ -254,6 +257,7 @@ def test_watch_move_outside_requires_opt_in(tmp_path: Path) -> None:
         [WatchEvent(kind="moved", src=source_path, dest=destination)],
     )
     assert suppressed_batch is not None
+    assert suppressed_batch.json_payload["context"]["llm"]["model"]
     assert suppressed_batch.counts["deletes"] == 0
     assert suppressed_batch.suppressed_deletions
     assert suppressed_batch.suppressed_deletions[0]["kind"] == "moved_out"
@@ -265,6 +269,7 @@ def test_watch_move_outside_requires_opt_in(tmp_path: Path) -> None:
         [WatchEvent(kind="moved", src=source_path, dest=destination)],
     )
     assert executed_batch is not None
+    assert executed_batch.json_payload["context"]["llm"]["model"]
     assert executed_batch.counts["deletes"] == 1
     removals = executed_batch.json_payload["removals"]
     assert removals and removals[0]["kind"] == "moved_out"

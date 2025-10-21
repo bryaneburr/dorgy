@@ -4,6 +4,7 @@
 - Honour configuration-driven defaults from `ConfigManager` (`config.cli.quiet_default`, `config.cli.summary_default`, `config.cli.status_history_limit`) before applying command-line overrides.
 - Keep `--summary`, `--quiet`, and `--json` validation logic aligned across commands; update integration tests when introducing new mutually exclusive flags.
 - Machine-readable outputs should mirror dry-run and executed payloads, including `context` and `counts` metadata; extend tests in `tests/test_cli_org.py` for new JSON schemas.
+- JSON payloads must expose `context.llm` (model, temperature, fallback state); keep CLI/watch tests updated whenever the LLM metadata schema evolves.
 - Leverage option factories in `dorgy.cli.options` (JSON/summary/quiet/dry-run/etc.) and `resolve_mode_settings` to keep flag behaviour consistent; new commands should not reimplement this logic.
 - `--prompt-file` is available on `org` and `watch`; it must override `--prompt`, read UTF-8 text, and surface through JSON payloads/tests when prompt handling changes.
 - Progress instrumentation lives behind `_ProgressScope` and should only activate when `config.cli.progress_enabled` and the console is interactive; disable automatically for JSON/quiet/summary contexts.
