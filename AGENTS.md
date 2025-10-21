@@ -9,6 +9,7 @@
 - CLI commands share summary/quiet helpers and standardized JSON error payloads; extend those utilities when adding new commands and update tests accordingly.
 - The watch service must reuse the organization pipeline helpers and surface batches via the shared CLI output helpers and JSON schema.
 - Destructive watch removals are guarded by `processing.watch.allow_deletions`/`--allow-deletions`; when opt-out, suppress deletions but emit notes/JSON entries so automation can triage.
+- Keep `ARCH.md` current as architecture or coordination patterns evolve; update the doc alongside substantive pipeline, module, or workflow changes.
 - PyPI distribution work must run on a feature branch, complete TestPyPI validation, and update SPEC Phase 9 plus `notes/STATUS.md` before tagging/releases.
 - CLI startup relies on lazy imports (`__getattr__` + `_load_dependency`); when adding new modules, extend the lazy map instead of reintroducing eager imports so `dorgy` remains responsive.
 - GitHub Actions workflow `.github/workflows/ci.yml` enforces Ruff lint/format, MyPy (`uv run mypy src main.py`), and pytest via `uv` on pushes to `main` and pull requests; add new automated checks there to keep CI authoritative.

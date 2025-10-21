@@ -4,6 +4,8 @@ Dorgy is a python-based CLI app that automatically organizes your files.
 
 ## 1. Executive Summary
 
+Refer to the [architecture overview](ARCH.md) for a detailed breakdown of runtime components, pipelines, and data flow; keep the document in sync with the phases outlined here.
+
 An automated file organization system that leverages LLMs to intelligently categorize, rename, and structure files across various formats. The system processes documents, images, and other file types using advanced document understanding, metadata extraction, and semantic analysis.
 
 ### Primary Use Cases

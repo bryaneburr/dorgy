@@ -8,7 +8,7 @@
 
 <img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy.png" alt="dorgy logo" height="200">
 
-`dorgy` is an AI-assisted command line toolkit that keeps growing collections of files tidy. The project already ships ingestion, classification, organization, watch, search, and undo workflows while we continue to flesh out the roadmap captured in `SPEC.md`.
+`dorgy` is an AI-assisted command line toolkit that keeps growing collections of files tidy. The project already ships ingestion, classification, organization, watch, search, and undo workflows while we continue to flesh out the roadmap captured in `SPEC.md`. For a deeper dive into how the components fit together, see the [architecture overview](ARCH.md).
 
 ### Why Dorgy?
 
