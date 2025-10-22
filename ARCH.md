@@ -32,7 +32,7 @@
 
 ### CLI Layer (`src/dorgy/cli.py`, `src/dorgy/__init__.py`, `main.py`)
 
-Implements command registration, lazy dependency loading, unified error handling, and progress/output helpers. `cli_options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. `cli_support.py` centralizes cross-command helpers: prompt resolution, classification orchestration (`run_classification`), decision/descriptor zipping, watch batch rendering, and summary computations.
+Implements command registration, lazy dependency loading, unified error handling, progress/output helpers, and graceful shutdown handling. `cli_options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. `cli_support.py` centralizes cross-command helpers: prompt resolution, classification orchestration (`run_classification`), decision/descriptor zipping, watch batch rendering, and summary computations. `dorgy.shutdown` installs SIGINT/SIGTERM handlers so Ctrl+C sets a shared event, allowing ingestion, classification, and watch loops to unwind quickly before the CLI exits with code 130.
 
 ### Configuration (`src/dorgy/config/`)
 
@@ -40,7 +40,7 @@ Implements command registration, lazy dependency loading, unified error handling
 
 ### Ingestion (`src/dorgy/ingestion/`)
 
-The pipeline discovers files, filters by size/hidden/locking rules, computes hashes for deduplication, extracts MIME-aligned metadata and previews, and optionally stages or copies content. `DirectoryScanner`, `TypeDetector`, `HashComputer`, and `MetadataExtractor` are modular so tests can stub components. `IngestionPipeline` coordinates threading, emits stage callbacks, enforces sample limits for large files, honours `processing.preview_char_limit`, and captures errors/needing-review flags.
+The pipeline discovers files, filters by size/hidden/locking rules, computes hashes for deduplication, extracts MIME-aligned metadata and previews, and optionally stages or copies content. `DirectoryScanner`, `TypeDetector`, `HashComputer`, and `MetadataExtractor` are modular so tests can stub components. `IngestionPipeline` coordinates threading, emits stage callbacks, enforces sample limits for large files, honours `processing.preview_char_limit`, and captures errors/needing-review flags. It also polls the shared shutdown event so Ctrl+C interrupts long-running extractions without leaving staging artefacts behind.
 
 ### Classification (`src/dorgy/classification/`)
 
@@ -56,7 +56,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### Watch Service (`src/dorgy/watch/service.py`)
 
-`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, and CLI output helpers for consistent automation surfaces.
+`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, CLI output helpers, and the shared shutdown event so Ctrl+C stops observers and queued work promptly.
 
 ### CLI Support & Shared Utilities
 

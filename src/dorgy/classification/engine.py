@@ -27,6 +27,7 @@ except ImportError:  # pragma: no cover - executed when DSPy absent
 from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.classification.exceptions import LLMUnavailableError
 from dorgy.config.models import LLMSettings
+from dorgy.shutdown import ShutdownRequested, check_for_shutdown
 
 from .models import (
     ClassificationBatch,
@@ -114,6 +115,7 @@ class ClassificationEngine:
             ClassificationBatch: Aggregated decisions and errors.
         """
         requests = list(requests)
+        check_for_shutdown()
         batch = ClassificationBatch(decisions=[None] * len(requests), errors=[])
         if not requests:
             return batch
@@ -157,6 +159,7 @@ class ClassificationEngine:
         def _classify_single(
             index: int, request: ClassificationRequest
         ) -> tuple[int, Optional[ClassificationDecision], Optional[str]]:
+            check_for_shutdown()
             start = time.perf_counter()
             worker_id = _worker_id()
             _notify_progress(index, request, worker_id, "start", None, None)
@@ -189,6 +192,7 @@ class ClassificationEngine:
 
         if worker_count == 1:
             for idx, request in enumerate(requests):
+                check_for_shutdown()
                 index, decision, error = _classify_single(idx, request)
                 batch.decisions[index] = decision
                 if error:
@@ -200,11 +204,17 @@ class ClassificationEngine:
                 executor.submit(_classify_single, idx, request): idx
                 for idx, request in enumerate(requests)
             }
-            for future in as_completed(future_map):
-                index, decision, error = future.result()
-                batch.decisions[index] = decision
-                if error:
-                    batch.errors.append(error)
+            try:
+                for future in as_completed(future_map):
+                    check_for_shutdown()
+                    index, decision, error = future.result()
+                    batch.decisions[index] = decision
+                    if error:
+                        batch.errors.append(error)
+            except ShutdownRequested:
+                for future in future_map:
+                    future.cancel()
+                raise
 
         return batch
 

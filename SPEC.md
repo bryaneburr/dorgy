@@ -370,6 +370,7 @@ The project will progress through the following phases. Update the status column
 - Locked file handling supports skip/wait/copy actions; copy operations stage files safely before cleanup.
 - Corrupted files respect the `quarantine` policy, with CLI feedback and state/log updates.
 - `dorgy org` now wires the ingestion pipeline, dry-run preview, JSON output, and state persistence.
+- Ctrl+C/SIGTERM now travels through a shared shutdown event so ingestion, classification, and watch loops unwind quickly before the CLI exits.
 
 ## Phase 3 – LLM & DSPy Integration Goals
 

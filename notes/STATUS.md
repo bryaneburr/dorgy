@@ -158,3 +158,4 @@
 - Landed configurable preview limits by wiring `processing.preview_char_limit` through config models, `MetadataExtractor`, CLI, and watch service; descriptors now record `preview_limit_characters` alongside longer previews.
 - Extended ingestion tests to cover the new limit behaviour and documented the knob in ARCH, SPEC, and AGENTS guidance.
 - Next actions: fan out the new config field to config CLI validation/help text and run the full `uv run pre-commit run --all-files` sweep once adjacent config docs are refreshed.
+- Added a shared shutdown manager that traps SIGINT/SIGTERM, sets a global event, and teaches ingestion/classification/watch loops to poll it so Ctrl+C ends runs cleanly without leaking threads.
