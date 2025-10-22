@@ -50,6 +50,7 @@ from dorgy.ingestion.models import IngestionResult
 from dorgy.organization.executor import OperationExecutor
 from dorgy.organization.models import DeleteOperation, OperationPlan
 from dorgy.organization.planner import OrganizerPlanner
+from dorgy.shutdown import ShutdownRequested, check_for_shutdown, shutdown_requested
 from dorgy.state import (
     CollectionState,
     MissingStateError,
@@ -220,8 +221,10 @@ class WatchService:
             list[WatchBatchResult]: Results produced for roots that yielded work.
         """
 
+        check_for_shutdown()
         results: list[WatchBatchResult] = []
         for root in self._roots:
+            check_for_shutdown()
             batch = self._run_batch(root, [WatchEvent(kind="scan", src=root)])
             if batch is not None:
                 results.append(batch)
@@ -284,6 +287,9 @@ class WatchService:
         flush_deadline: Optional[float] = None
 
         while not self._stop_event.is_set():
+            if shutdown_requested():
+                self.stop()
+                break
             timeout: Optional[float] = None
             if flush_deadline is not None:
                 timeout = max(0.0, flush_deadline - time.monotonic())
@@ -334,12 +340,17 @@ class WatchService:
             pending: Mapping of roots to pending watch events awaiting processing.
             callback: Callable used to surface completed batch results.
         """
+        check_for_shutdown()
         for root, events in list(pending.items()):
             if not events:
                 continue
             triggered = list(events)
             try:
+                check_for_shutdown()
                 batch = self._run_batch(root, triggered)
+            except ShutdownRequested:
+                self.stop()
+                raise
             except Exception as exc:  # pragma: no cover - defensive branch
                 self._log_failure(root, [event.src for event in triggered], exc)
                 backoff = self._backoff[root]
@@ -364,6 +375,7 @@ class WatchService:
             Optional[WatchBatchResult]: Populated batch result, or ``None`` when no
             work was required.
         """
+        check_for_shutdown()
         event_list = list(watch_events)
         if not event_list:
             return None
@@ -491,17 +503,21 @@ class WatchService:
                 scanner=scanner,
                 detector=TypeDetector(),
                 hasher=HashComputer(),
-                extractor=MetadataExtractor(),
+                extractor=MetadataExtractor(
+                    preview_char_limit=self._config.processing.preview_char_limit
+                ),
                 processing=self._config.processing,
                 staging_dir=staging_dir,
                 allow_writes=not self._dry_run,
                 vision_captioner=vision_captioner,
             )
 
+            check_for_shutdown()
             result = pipeline.run(ingestion_inputs, prompt=self._prompt)
             if not self._dry_run and vision_captioner is not None:
                 vision_captioner.save_cache()
             parallel_workers = max(1, self._config.processing.parallel_workers)
+            check_for_shutdown()
             classification_batch = run_classification(
                 result.processed,
                 self._prompt,
@@ -516,6 +532,7 @@ class WatchService:
             paired = list(zip_decisions(classification_batch, result.processed))
             confidence_threshold = self._config.ambiguity.confidence_threshold
             for decision, descriptor in paired:
+                check_for_shutdown()
                 if decision is not None and decision.confidence < confidence_threshold:
                     decision.needs_review = True
                     if descriptor.path not in result.needs_review:
@@ -533,6 +550,7 @@ class WatchService:
             move_map = {operation.source: operation.destination for operation in plan.moves}
 
             for decision, descriptor in paired:
+                check_for_shutdown()
                 original_path = descriptor.path
                 rename_target = rename_map.get(original_path)
                 move_key = rename_target if rename_target is not None else original_path

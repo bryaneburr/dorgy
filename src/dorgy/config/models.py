@@ -63,6 +63,8 @@ class ProcessingOptions(DorgyBaseModel):
 
     Attributes:
         process_images: Whether to enable image captioning/classification.
+        preview_char_limit: Maximum number of characters retained in previews provided to
+            downstream classifiers.
         process_audio: Whether to process audio files.
         follow_symlinks: Whether to traverse symbolic links.
         process_hidden_files: Whether hidden files should be included.
@@ -85,6 +87,7 @@ class ProcessingOptions(DorgyBaseModel):
     process_hidden_files: bool = False
     recurse_directories: bool = False
     max_file_size_mb: int = 100
+    preview_char_limit: int = Field(default=2048, ge=1)
     sample_size_mb: int = 10
     locked_files: "LockedFilePolicy" = Field(default_factory=lambda: LockedFilePolicy())
     corrupted_files: "CorruptedFilePolicy" = Field(default_factory=lambda: CorruptedFilePolicy())

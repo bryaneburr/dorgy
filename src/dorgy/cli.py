@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, cast
@@ -41,6 +42,7 @@ from dorgy.cli_options import (
     summary_option,
 )
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
+from dorgy.shutdown import ShutdownRequested, shutdown_manager
 
 if TYPE_CHECKING:
     from dorgy.classification import VisionCache, VisionCaptioner
@@ -885,6 +887,7 @@ def org(
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
 
     json_enabled = json_output
+    mode: ModeResolution | None = None
     try:
         prompt = resolve_prompt_text(prompt, prompt_file)
     except (OSError, UnicodeDecodeError) as exc:
@@ -894,13 +897,15 @@ def org(
         manager.ensure_exists()
         config = manager.load()
 
-        mode: ModeResolution = resolve_mode_settings(
+        mode = resolve_mode_settings(
             ctx,
             config.cli,
             quiet_flag=quiet,
             summary_flag=summary_mode,
             json_flag=json_output,
         )
+        if mode is None:  # pragma: no cover - defensive guard
+            raise RuntimeError("Failed to resolve mode settings")
         quiet_enabled = mode.quiet
         summary_only = mode.summary
         json_enabled = mode.json_output
@@ -956,7 +961,7 @@ def org(
             scanner=scanner,
             detector=TypeDetectorCls(),
             hasher=HashComputerCls(),
-            extractor=MetadataExtractorCls(),
+            extractor=MetadataExtractorCls(preview_char_limit=config.processing.preview_char_limit),
             processing=config.processing,
             staging_dir=staging_dir,
             allow_writes=not dry_run,
@@ -1530,6 +1535,16 @@ def org(
             )
         else:
             console.print_json(data=json_payload)
+    except ShutdownRequested:
+        quiet_flag = mode.quiet if mode is not None else quiet
+        summary_flag = mode.summary if mode is not None else summary_mode
+        if not json_enabled:
+            _emit_message(
+                "[yellow]Organization cancelled by user request.[/yellow]",
+                mode="summary",
+                quiet=quiet_flag,
+                summary_only=summary_flag,
+            )
     except ConfigError as exc:
         _handle_cli_error(str(exc), code="config_error", json_output=json_enabled, original=exc)
     except LLMUnavailableError as exc:
@@ -1695,6 +1710,16 @@ def watch(
                     original=exc,
                 )
                 return
+            except ShutdownRequested:
+                task.complete("Watch run aborted")
+                if not json_output:
+                    _emit_message(
+                        "[yellow]Watch stopped by user request.[/yellow]",
+                        mode="summary",
+                        quiet=quiet_enabled,
+                        summary_only=summary_only,
+                    )
+                return
             task.complete("Watch run complete")
         if json_output:
             console.print_json(data={"batches": [batch.json_payload for batch in batches]})
@@ -1734,7 +1759,7 @@ def watch(
                 summary_only=summary_only,
             )
         )
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ShutdownRequested):
         service.stop()
         if not json_output:
             _emit_message(
@@ -2988,7 +3013,15 @@ def main() -> None:
     Returns:
         None: This function is invoked for its side effects.
     """
-    cli()
+    with shutdown_manager:
+        try:
+            cli()
+        except ShutdownRequested:
+            console.print("[yellow]Operation cancelled by user request.[/yellow]")
+            sys.exit(130)
+        except KeyboardInterrupt:
+            console.print("[yellow]Operation cancelled by user request.[/yellow]")
+            sys.exit(130)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ from dorgy.classification import (
 from dorgy.config import DorgyConfig
 from dorgy.ingestion import FileDescriptor
 from dorgy.organization.models import OperationPlan
+from dorgy.shutdown import ShutdownRequested, check_for_shutdown
 from dorgy.state import FileRecord
 
 
@@ -100,6 +101,7 @@ def run_classification(
     """
 
     descriptors = list(descriptors)
+    check_for_shutdown()
     if not descriptors:
         return ClassificationBatch()
 
@@ -133,6 +135,7 @@ def run_classification(
     for index, descriptor in enumerate(descriptors):
         key = decision_cache_key(descriptor, root)
         cached = cache_instance.get(key) if cache_instance is not None and key is not None else None
+        check_for_shutdown()
         if cached is not None:
             decisions[index] = cached
             notify("start", index, worker_id=None, duration=None)
@@ -151,6 +154,7 @@ def run_classification(
     max_workers = max(1, max_workers)
 
     if pending_requests:
+        check_for_shutdown()
         engine = ClassificationEngine(config.llm)
 
         def _on_classification_progress(
@@ -164,19 +168,24 @@ def run_classification(
             original_index = pending_indices[local_index]
             notify(event, original_index, worker_id, duration)
 
-        batch = engine.classify(
-            pending_requests,
-            max_workers=max_workers,
-            progress_callback=_on_classification_progress if on_progress else None,
-        )
+        try:
+            batch = engine.classify(
+                pending_requests,
+                max_workers=max_workers,
+                progress_callback=_on_classification_progress if on_progress else None,
+            )
+        except ShutdownRequested:
+            raise
         errors.extend(batch.errors)
         for idx, decision, key in zip(pending_indices, batch.decisions, pending_keys, strict=False):
+            check_for_shutdown()
             if decision is not None:
                 decisions[idx] = decision
                 if not dry_run and cache_instance is not None and key is not None:
                     cache_instance.set(key, decision)
 
     if cache_instance is not None and not dry_run:
+        check_for_shutdown()
         cache_instance.save()
 
     return ClassificationBatch(decisions=decisions, errors=errors)

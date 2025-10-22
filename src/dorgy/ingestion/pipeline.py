@@ -13,6 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
     from dorgy.classification.vision import VisionCaptioner
 
 from dorgy.config.models import ProcessingOptions
+from dorgy.shutdown import ShutdownRequested, check_for_shutdown
 
 from .detectors import HashComputer, TypeDetector
 from .discovery import DirectoryScanner
@@ -72,6 +73,7 @@ class IngestionPipeline:
         Returns:
             IngestionResult: Aggregate of processed descriptors and status.
         """
+        check_for_shutdown()
         result = IngestionResult()
 
         emit_lock = threading.Lock()
@@ -85,6 +87,7 @@ class IngestionPipeline:
                     pass
 
         for root in roots:
+            check_for_shutdown()
             root_path = root.expanduser()
             pending_items = list(self.scanner.scan(root_path))
             if not pending_items:
@@ -111,6 +114,7 @@ class IngestionPipeline:
                 return worker
 
             def process_pending(pending: PendingFile) -> IngestionResult:
+                check_for_shutdown()
                 local_result = IngestionResult()
                 process_path = pending.path
                 metadata_extra: dict[str, str] = {}
@@ -147,18 +151,21 @@ class IngestionPipeline:
                 if pending.oversized and self.processing.sample_size_mb > 0:
                     sample_limit = self.processing.sample_size_mb * 1024 * 1024
                 try:
+                    check_for_shutdown()
                     emit(
                         "detect",
                         pending.path,
                         {"size_bytes": pending.size_bytes, "worker_id": worker_id},
                     )
                     mime, category = self.detector.detect(process_path)
+                    check_for_shutdown()
                     emit(
                         "hash",
                         pending.path,
                         {"size_bytes": pending.size_bytes, "worker_id": worker_id},
                     )
                     file_hash = self.hasher.compute(process_path)
+                    check_for_shutdown()
                     emit(
                         "metadata",
                         pending.path,
@@ -170,6 +177,7 @@ class IngestionPipeline:
                         metadata.setdefault("oversized", "true")
                         if sample_limit:
                             metadata.setdefault("sample_limit", str(sample_limit))
+                    check_for_shutdown()
                     emit(
                         "preview",
                         pending.path,
@@ -186,6 +194,7 @@ class IngestionPipeline:
                         and mime.startswith("image/")
                     ):
                         try:
+                            check_for_shutdown()
                             vision_result = self.vision_captioner.caption(
                                 process_path,
                                 cache_key=file_hash,
@@ -267,16 +276,22 @@ class IngestionPipeline:
 
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
                 futures = [executor.submit(process_pending, pending) for pending in pending_items]
-                for future in as_completed(futures):
-                    local = future.result()
-                    if local.processed:
-                        result.processed.extend(local.processed)
-                    if local.needs_review:
-                        result.needs_review.extend(local.needs_review)
-                    if local.quarantined:
-                        result.quarantined.extend(local.quarantined)
-                    if local.errors:
-                        result.errors.extend(local.errors)
+                try:
+                    for future in as_completed(futures):
+                        check_for_shutdown()
+                        local = future.result()
+                        if local.processed:
+                            result.processed.extend(local.processed)
+                        if local.needs_review:
+                            result.needs_review.extend(local.needs_review)
+                        if local.quarantined:
+                            result.quarantined.extend(local.quarantined)
+                        if local.errors:
+                            result.errors.extend(local.errors)
+                except ShutdownRequested:
+                    for future in futures:
+                        future.cancel()
+                    raise
 
         return result
 
