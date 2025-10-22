@@ -158,4 +158,10 @@
 - Landed configurable preview limits by wiring `processing.preview_char_limit` through config models, `MetadataExtractor`, CLI, and watch service; descriptors now record `preview_limit_characters` alongside longer previews.
 - Extended ingestion tests to cover the new limit behaviour and documented the knob in ARCH, SPEC, and AGENTS guidance.
 - Next actions: fan out the new config field to config CLI validation/help text and run the full `uv run pre-commit run --all-files` sweep once adjacent config docs are refreshed.
+
+## 2025-10-21
+- Added `_coerce_confidence` normalization to `ClassificationEngine`, prompting DSPy for decimal confidences and reusing the helper for vision caption scores so low-certainty checks aren't tripped by malformed model outputs.
+- Lowered the default `ambiguity.confidence_threshold` to 0.60, refreshed SPEC/ARCH/config AGENTS guidance, and aligned CLI integration tests with the new review semantics.
+- Bumped project version to 0.2.0 in `pyproject.toml`/`uv.lock`, ran the full pre-commit suite (Ruff, MyPy, pytest) to confirm the tree is release-ready, and staged documentation updates ahead of publishing.
+- Next actions: capture release notes for 0.2.0, push the feature branch, and open a PR before running the TestPyPI/PyPI release workflow.
 - Added a shared shutdown manager that traps SIGINT/SIGTERM, sets a global event, and teaches ingestion/classification/watch loops to poll it so Ctrl+C ends runs cleanly without leaking threads.

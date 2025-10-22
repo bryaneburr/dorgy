@@ -45,6 +45,48 @@ _CATEGORY_ALIASES = {
     "image": "Media/Images",
 }
 
+_CONFIDENCE_PATTERN = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _coerce_confidence(raw: object, *, default: float = 0.5) -> float:
+    """Return a normalised confidence score between 0 and 1.
+
+    Args:
+        raw: Value returned by the language model for confidence.
+        default: Fallback value to use when the model omits a numeric score.
+
+    Returns:
+        float: Confidence bounded to the inclusive range ``[0.0, 1.0]``.
+    """
+
+    numeric: Optional[float] = None
+
+    if isinstance(raw, (int, float)):
+        numeric = float(raw)
+    elif isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped:
+            candidate = stripped.replace(",", ".")
+            match = _CONFIDENCE_PATTERN.search(candidate)
+            if match:
+                try:
+                    numeric = float(match.group())
+                except ValueError:
+                    numeric = None
+            if numeric is None:
+                lowered = stripped.lower()
+                if "high" in lowered:
+                    numeric = 0.9
+                elif "medium" in lowered:
+                    numeric = 0.6
+                elif "low" in lowered:
+                    numeric = 0.2
+    if numeric is None:
+        numeric = default
+    if not (numeric >= 0.0):
+        numeric = default
+    return max(0.0, min(1.0, numeric))
+
 
 class ClassificationEngine:
     """Apply DSPy programs to classify and rename files.
@@ -332,6 +374,25 @@ class ClassificationEngine:
                 "heuristic classifier."
             ) from exc
 
+    def _fallback_confidence(self, classification: object) -> float:
+        """Return a conservative confidence when the model omits a score.
+
+        Args:
+            classification: Raw DSPy classification object.
+
+        Returns:
+            float: Calibrated confidence derived from category and tag signals.
+        """
+
+        primary = getattr(classification, "primary_category", None)
+        if isinstance(primary, str) and primary.strip():
+            if primary.strip().lower() != "general":
+                return 0.6
+        tags = getattr(classification, "tags", None) or []
+        if tags:
+            return 0.5
+        return 0.4
+
     def _classify_with_dspy(self, request: ClassificationRequest) -> ClassificationDecision:
         """Leverage DSPy program to classify the file.
 
@@ -355,12 +416,21 @@ class ClassificationEngine:
             "prompt": request.prompt or "",
         }
 
+        confidence_guidance = (
+            "When providing the confidence value, respond with a decimal between 0 and 1 "
+            "(for example 0.73). Avoid percentages or verbal qualifiers."
+        )
+        if payload["prompt"]:
+            payload["prompt"] = f"{payload['prompt']}\n\n{confidence_guidance}"
+        else:
+            payload["prompt"] = confidence_guidance
+
         classification, rename = self._program(payload)
 
-        try:
-            confidence = float(classification.confidence)
-        except (ValueError, TypeError):
-            confidence = 0.0
+        confidence_raw = getattr(classification, "confidence", None)
+        confidence = _coerce_confidence(confidence_raw)
+        if confidence <= 0.0:
+            confidence = self._fallback_confidence(classification)
 
         secondary = classification.secondary_categories or []
         tags = classification.tags or []

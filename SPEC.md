@@ -158,7 +158,7 @@ organization:
 
 # Ambiguity Handling
 ambiguity:
-  confidence_threshold: 0.80  # Flag for review if below this
+  confidence_threshold: 0.60  # Flag for review if below this
   max_auto_categories: 3      # Max tags/categories per file
 
 # Performance
@@ -284,7 +284,7 @@ class dorgyanizer(dspy.Module):
         )
         
         # Generate new name if needed
-        if classification.confidence >= 0.8:
+        if classification.confidence >= 0.6:
             new_name = self.renamer(
                 filename=file_info['filename'],
                 file_type=file_info['type'],
@@ -298,7 +298,7 @@ class dorgyanizer(dspy.Module):
         return {
             'classification': classification,
             'suggested_name': new_name,
-            'needs_review': classification.confidence < 0.8
+            'needs_review': classification.confidence < 0.6
         }
 ```
 
