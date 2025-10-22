@@ -11,3 +11,4 @@
 - `LLMSettings` expects LiteLLM-style `llm.model` values (e.g., `openai/gpt-4o-mini`); rely solely on the model string when wiring new integrations so configuration stays aligned with LiteLLM conventions.
 - Structure planner responses may include conversational wrapping or fenced code blocks; keep `_decode_tree_payload` and `tests/test_structure_planner.py` in sync when adjusting accepted output formats.
 - DSPy integration pulls runtime settings from `DorgyConfig.llm`; when adding new parameters (e.g., custom gateways) keep the configuration model, CLI overrides, and LM wiring in sync.
+- DSPy outputs often provide non-numeric confidence values; reuse `_coerce_confidence` when new call sites surface model confidence so downstream review thresholds stay consistent across classifiers.

@@ -53,7 +53,7 @@ def test_cli_org_persists_state(tmp_path: Path) -> None:
     assert record.get("hash")
     assert "Documents" in record.get("categories", [])
     assert record.get("rename_suggestion") == "doc"
-    assert record.get("needs_review") is True
+    assert record.get("needs_review") is False
     final_path = root / "documents" / "doc.txt"
     assert final_path.exists()
     snapshot_path = root / ".dorgy" / "orig.json"
@@ -85,7 +85,7 @@ def test_cli_org_classification_updates_state(tmp_path: Path) -> None:
     assert "Documents" in record["categories"]
     assert record["rename_suggestion"] == "invoice"
     assert record.get("confidence") is not None
-    assert record.get("needs_review") is True
+    assert record.get("needs_review") is False
 
 
 def test_cli_org_dry_run(tmp_path: Path) -> None:

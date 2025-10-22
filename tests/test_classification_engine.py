@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dorgy.classification.engine import ClassificationEngine
+from dorgy.classification.engine import ClassificationEngine, _coerce_confidence
 from dorgy.classification.exceptions import LLMUnavailableError
 from dorgy.classification.models import ClassificationRequest
 from dorgy.ingestion.models import FileDescriptor
@@ -58,3 +58,14 @@ def test_engine_raises_without_fallback_when_llm_missing(monkeypatch) -> None:
 
     with pytest.raises(LLMUnavailableError):
         ClassificationEngine()
+
+
+def test_coerce_confidence_parses_numeric_strings() -> None:
+    assert _coerce_confidence("0.87") == pytest.approx(0.87)
+    assert _coerce_confidence("Confidence: 0.42") == pytest.approx(0.42)
+
+
+def test_coerce_confidence_interprets_verbal_scale() -> None:
+    assert _coerce_confidence("high confidence") == pytest.approx(0.9)
+    assert _coerce_confidence("medium") == pytest.approx(0.6)
+    assert _coerce_confidence("low certainty") == pytest.approx(0.2)

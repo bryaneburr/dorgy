@@ -175,7 +175,7 @@ class AmbiguitySettings(DorgyBaseModel):
         max_auto_categories: Maximum automatic categories to assign.
     """
 
-    confidence_threshold: float = 0.8
+    confidence_threshold: float = 0.6
     max_auto_categories: int = 3
 
 

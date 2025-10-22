@@ -16,6 +16,7 @@ from dorgy.classification.dspy_logging import configure_dspy_logging
 from dorgy.config.models import LLMSettings
 
 from .cache import VisionCache
+from .engine import _coerce_confidence
 from .models import VisionCaption
 
 LOGGER = logging.getLogger(__name__)
@@ -167,10 +168,10 @@ class VisionCaptioner:
         labels = getattr(response, "labels", []) or []
         if not isinstance(labels, list):
             labels = []
-        try:
-            confidence = float(getattr(response, "confidence", ""))
-        except (TypeError, ValueError):
-            confidence = None
+        confidence_raw = getattr(response, "confidence", None)
+        confidence = None
+        if confidence_raw not in ("", None):
+            confidence = _coerce_confidence(confidence_raw)
         reasoning = getattr(response, "reasoning", None)
 
         result = VisionCaption(
