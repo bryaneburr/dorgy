@@ -165,3 +165,8 @@
 - Bumped project version to 0.2.0 in `pyproject.toml`/`uv.lock`, ran the full pre-commit suite (Ruff, MyPy, pytest) to confirm the tree is release-ready, and staged documentation updates ahead of publishing.
 - Next actions: capture release notes for 0.2.0, push the feature branch, and open a PR before running the TestPyPI/PyPI release workflow.
 - Added a shared shutdown manager that traps SIGINT/SIGTERM, sets a global event, and teaches ingestion/classification/watch loops to poll it so Ctrl+C ends runs cleanly without leaking threads.
+
+## 2025-11-04
+- Added a GitHub Actions build badge to `README.md` so the CI status is visible from the project landing page.
+- Ran `uv run pre-commit run --all-files` (Ruff, Ruff format, MyPy, pytest) to validate the tree before committing.
+- Next actions: monitor the README badge after merge to confirm it renders the expected passing/failing state from `main`.
