@@ -22,6 +22,19 @@ from dorgy.ingestion.models import FileDescriptor
 
 LOGGER = logging.getLogger(__name__)
 
+_BASE_INSTRUCTIONS = (
+    "You are organising a user's personal documents. Produce a concise nested folder "
+    "structure that groups related files together. Prefer reusing a small number of "
+    "top-level folders and nest subfolders when appropriate. Generate JSON with the "
+    'shape {"files": [{"source": "<original relative path>", "destination": '
+    '"<relative destination path>"}]}. Do not include absolute paths or drive letters. '
+    "Destinations must keep the original filename extension exactly once. Use hyphenated "
+    "folder names and avoid extremely long directory chains. Prefer placing files inside "
+    "meaningful directories instead of leaving them at the root; create subfolders when it "
+    "helps keep related items together, and only leave a file at the top level if no "
+    "sensible grouping exists."
+)
+
 _CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
@@ -105,6 +118,7 @@ class StructurePlanner:
         decisions: Iterable[ClassificationDecision | None],
         *,
         source_root: Path,
+        prompt: Optional[str] = None,
     ) -> Dict[Path, Path]:
         """Return a mapping of descriptor paths to proposed destinations.
 
@@ -112,6 +126,7 @@ class StructurePlanner:
             descriptors: Ingestion descriptors from the pipeline.
             decisions: Classification decisions aligned with descriptors.
             source_root: Root directory of the collection being organised.
+            prompt: Optional user-provided guidance appended to the planner prompt.
 
         Returns:
             Mapping of descriptor absolute paths to relative destinations.
@@ -164,23 +179,10 @@ class StructurePlanner:
                 )
             payload.append(entry)
 
-        instructions = (
-            "You are organising a user's personal documents. Produce a concise nested folder "
-            "structure that groups related files together. Prefer reusing a small number of "
-            "top-level folders and nest subfolders when appropriate. Generate JSON with the "
-            'shape {"files": [{"source": "<original relative path>", "destination": '
-            '"<relative destination path>"}]}. Do not include absolute paths or drive letters. '
-            "Destinations must keep the original filename extension exactly once. Use hyphenated "
-            "folder names and avoid extremely long directory chains. Prefer placing files inside "
-            "meaningful directories instead of leaving them at the root; create subfolders when it "
-            "helps keep related items together, and only leave a file at the top level if no "
-            "sensible grouping exists."
-        )
-
         try:
             response = self._program(
                 files_json=json.dumps(payload, ensure_ascii=False),
-                goal=instructions,
+                goal=self._compose_goal_prompt(prompt),
             )
         except Exception as exc:  # pragma: no cover - defensive safeguard
             LOGGER.debug("Structure planner request failed: %s", exc)
@@ -349,3 +351,21 @@ class StructurePlanner:
         if start == -1 or end == -1 or end <= start:
             return None
         return value[start : end + 1]
+
+    @staticmethod
+    def _compose_goal_prompt(prompt: Optional[str]) -> str:
+        """Return the LLM goal instructions including any user guidance.
+
+        Args:
+            prompt: Optional user-provided instructions to append.
+
+        Returns:
+            Full prompt text supplied to the structure planner model.
+        """
+
+        if prompt is None:
+            return _BASE_INSTRUCTIONS
+        stripped = prompt.strip()
+        if not stripped:
+            return _BASE_INSTRUCTIONS
+        return f"{_BASE_INSTRUCTIONS}\n\nUser guidance:\n{stripped}"

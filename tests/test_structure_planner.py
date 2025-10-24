@@ -96,3 +96,43 @@ def test_structure_planner_propose_raises_on_empty_response(monkeypatch) -> None
 
     with pytest.raises(LLMResponseError):
         planner.propose([descriptor], [None], source_root=Path("/tmp"))
+
+
+def test_structure_planner_appends_prompt_to_goal() -> None:
+    descriptor = FileDescriptor(
+        path=Path("/tmp/sample.pdf"),
+        display_name="sample.pdf",
+        mime_type="application/pdf",
+    )
+
+    expected_goal = StructurePlanner._compose_goal_prompt("Group items by project")
+    captured: dict[str, object] = {}
+
+    class _CaptureProgram:
+        def __call__(self, **kwargs: object) -> object:
+            captured["goal"] = kwargs.get("goal")
+            return type(
+                "Resp",
+                (),
+                {
+                    "tree_json": json.dumps(
+                        {"files": [{"source": "sample.pdf", "destination": "docs/sample.pdf"}]}
+                    )
+                },
+            )()
+
+    planner = object.__new__(StructurePlanner)
+    planner._settings = LLMSettings()
+    planner._use_fallback = False
+    planner._enabled = True
+    planner._program = _CaptureProgram()  # type: ignore[attr-defined]
+
+    result = planner.propose(
+        [descriptor],
+        [None],
+        source_root=Path("/tmp"),
+        prompt="Group items by project",
+    )
+
+    assert captured["goal"] == expected_goal
+    assert result[descriptor.path] == Path("docs/sample.pdf")

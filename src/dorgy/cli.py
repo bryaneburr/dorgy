@@ -1130,6 +1130,7 @@ def org(
                         descriptor_list,
                         decision_list,
                         source_root=source_root,
+                        prompt=prompt,
                     )
                     if structure_task is not None:
                         structure_task.complete("Structure plan ready")
