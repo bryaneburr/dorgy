@@ -77,7 +77,7 @@
    - Implement a work queue/async loop to serialize organization runs (prevent overlapping plans).
 
 4. **CLI Command (`dorgy watch`)**
-   - Provide flags: `--recursive`, `--output`, `--debounce`, `--json`, `--prompt`, `--once` (process and exit) for testing.
+   - Provide flags: `--recursive`, `--output`, `--debounce`, `--json`, `--classify-prompt`, `--structure-prompt`, `--once` (process and exit) for testing.
    - Support dry-run mode (log what would be processed without applying changes).
    - Show live feedback (Rich progress or summaries) and log to `.dorgy/watch.log`.
 

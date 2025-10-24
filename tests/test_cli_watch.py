@@ -81,7 +81,7 @@ def test_cli_watch_once_json(tmp_path: Path) -> None:
 
 
 def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
-    """Ensure watch JSON payload reflects prompt file overrides."""
+    """Ensure watch JSON payload reflects classification prompt file overrides."""
 
     root = tmp_path / "prompt-watch"
     root.mkdir()
@@ -101,10 +101,12 @@ def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
             str(root),
             "--once",
             "--json",
-            "--prompt",
+            "--classify-prompt",
             "ignored prompt",
-            "--prompt-file",
+            "--classify-prompt-file",
             str(prompt_file),
+            "--structure-prompt",
+            "Structure batches by project",
         ],
         env=env,
     )
@@ -113,8 +115,10 @@ def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     batches = payload.get("batches", [])
     assert batches
-    context_prompt = batches[0]["context"]["prompt"]
-    assert context_prompt == prompt_content
+    context = batches[0]["context"]
+    assert context["classification_prompt"] == prompt_content
+    assert context["structure_prompt"] == "Structure batches by project"
+    assert context["prompt"] == prompt_content
 
 
 def _state_paths(root: Path) -> set[str]:
@@ -133,7 +137,8 @@ def _make_service(root: Path, *, allow_deletions: bool) -> WatchService:
     return WatchService(
         config,
         roots=[root],
-        prompt=None,
+        classification_prompt=None,
+        structure_prompt=None,
         output=None,
         dry_run=False,
         recursive=False,

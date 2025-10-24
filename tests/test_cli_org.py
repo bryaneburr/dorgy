@@ -221,7 +221,14 @@ def test_cli_org_records_vision_metadata(tmp_path: Path, monkeypatch: pytest.Mon
     runner = CliRunner()
     result = runner.invoke(
         cli,
-        ["org", str(root), "--prompt", "Highlight receipts"],
+        [
+            "org",
+            str(root),
+            "--classify-prompt",
+            "Highlight receipts",
+            "--structure-prompt",
+            "Group receipts by vendor",
+        ],
         env=env,
     )
 
@@ -243,7 +250,7 @@ def test_cli_org_prompt_file_overrides_inline_prompt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Ensure `--prompt-file` overrides inline prompts for organization runs."""
+    """Ensure `--classify-prompt-file` overrides inline prompts for organization runs."""
 
     root = tmp_path / "prompt-file"
     root.mkdir()
@@ -292,10 +299,12 @@ def test_cli_org_prompt_file_overrides_inline_prompt(
         [
             "org",
             str(root),
-            "--prompt",
+            "--classify-prompt",
             "This should be ignored",
-            "--prompt-file",
+            "--classify-prompt-file",
             str(prompt_file),
+            "--structure-prompt",
+            "Structure invoices by accounting period",
         ],
         env=env,
     )

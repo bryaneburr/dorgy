@@ -94,8 +94,8 @@ def output_option(help_text: str | None = None) -> Callable[[Callback], Callback
     )
 
 
-def prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for prompt overrides.
+def classify_prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
+    """Return a Click option decorator for classification prompt overrides.
 
     Args:
         help_text: Optional help text override.
@@ -104,12 +104,14 @@ def prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback
         Callable[[Callback], Callback]: Decorator applying the option.
     """
 
-    description = help_text or "Provide additional instructions for organization."
-    return click.option("--prompt", type=str, help=description)
+    description = help_text or "Provide extra classification guidance."
+    return click.option("--classify-prompt", type=str, help=description)
 
 
-def prompt_file_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for prompt file overrides.
+def classify_prompt_file_option(
+    help_text: str | None = None,
+) -> Callable[[Callback], Callback]:
+    """Return a Click option decorator for classification prompt files.
 
     Args:
         help_text: Optional help text override.
@@ -118,9 +120,43 @@ def prompt_file_option(help_text: str | None = None) -> Callable[[Callback], Cal
         Callable[[Callback], Callback]: Decorator applying the option.
     """
 
-    description = help_text or "Read prompt instructions from a text file."
+    description = help_text or "Read classification guidance from a text file."
     return click.option(
-        "--prompt-file",
+        "--classify-prompt-file",
+        type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
+        help=description,
+    )
+
+
+def structure_prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
+    """Return a Click option decorator for structure planning prompts.
+
+    Args:
+        help_text: Optional help text override.
+
+    Returns:
+        Callable[[Callback], Callback]: Decorator applying the option.
+    """
+
+    description = help_text or "Provide extra instructions for structure planning."
+    return click.option("--structure-prompt", type=str, help=description)
+
+
+def structure_prompt_file_option(
+    help_text: str | None = None,
+) -> Callable[[Callback], Callback]:
+    """Return a Click option decorator for structure prompt files.
+
+    Args:
+        help_text: Optional help text override.
+
+    Returns:
+        Callable[[Callback], Callback]: Decorator applying the option.
+    """
+
+    description = help_text or "Read structure planning instructions from a text file."
+    return click.option(
+        "--structure-prompt-file",
         type=click.Path(exists=True, dir_okay=False, readable=True, path_type=str),
         help=description,
     )
@@ -207,13 +243,15 @@ def resolve_mode_settings(
 
 __all__ = [
     "ModeResolution",
+    "classify_prompt_file_option",
+    "classify_prompt_option",
     "dry_run_option",
     "json_option",
     "output_option",
-    "prompt_option",
-    "prompt_file_option",
     "quiet_option",
     "recursive_option",
     "resolve_mode_settings",
+    "structure_prompt_file_option",
+    "structure_prompt_option",
     "summary_option",
 ]

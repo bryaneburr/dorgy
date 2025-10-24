@@ -70,7 +70,7 @@ def resolve_prompt_text(prompt: Optional[str], prompt_file: Optional[str]) -> Op
 
 def run_classification(
     descriptors: Iterable[FileDescriptor],
-    prompt: Optional[str],
+    classification_prompt: Optional[str],
     root: Path,
     dry_run: bool,
     config: DorgyConfig,
@@ -85,7 +85,7 @@ def run_classification(
 
     Args:
         descriptors: Descriptors awaiting classification.
-        prompt: Optional additional instruction for the classifier.
+        classification_prompt: Optional additional instruction for the classifier.
         root: Collection root used for relative cache keys.
         dry_run: Indicates whether the current run skips side effects.
         config: Loaded Dorgy configuration.
@@ -146,7 +146,7 @@ def run_classification(
         pending_requests.append(
             ClassificationRequest(
                 descriptor=descriptor,
-                prompt=prompt,
+                prompt=classification_prompt,
                 collection_root=root,
             )
         )

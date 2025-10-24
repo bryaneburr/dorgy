@@ -31,14 +31,16 @@ from rich.table import Table
 
 from dorgy.cli_options import (
     ModeResolution,
+    classify_prompt_file_option,
+    classify_prompt_option,
     dry_run_option,
     json_option,
     output_option,
-    prompt_file_option,
-    prompt_option,
     quiet_option,
     recursive_option,
     resolve_mode_settings,
+    structure_prompt_file_option,
+    structure_prompt_option,
     summary_option,
 )
 from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
@@ -816,8 +818,10 @@ def cli() -> None:
 @cli.command()
 @click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=str))
 @recursive_option("Include all subdirectories.")
-@prompt_file_option("Read extra organization instructions from a file.")
-@prompt_option("Provide extra instructions for organization.")
+@classify_prompt_file_option("Read classification guidance from a text file.")
+@classify_prompt_option("Provide extra classification guidance.")
+@structure_prompt_file_option("Read extra structure instructions from a file.")
+@structure_prompt_option("Provide extra structure instructions.")
 @output_option("Directory for organized files.")
 @dry_run_option("Preview changes without modifying files.")
 @json_option("Emit JSON describing proposed changes.")
@@ -828,8 +832,10 @@ def org(
     ctx: click.Context,
     path: str,
     recursive: bool,
-    prompt: str | None,
-    prompt_file: str | None,
+    classify_prompt: str | None,
+    classify_prompt_file: str | None,
+    structure_prompt: str | None,
+    structure_prompt_file: str | None,
     output: str | None,
     dry_run: bool,
     json_output: bool,
@@ -889,9 +895,19 @@ def org(
     json_enabled = json_output
     mode: ModeResolution | None = None
     try:
-        prompt = resolve_prompt_text(prompt, prompt_file)
+        classification_prompt = resolve_prompt_text(classify_prompt, classify_prompt_file)
     except (OSError, UnicodeDecodeError) as exc:
-        raise click.ClickException(f"Failed to read prompt file {prompt_file}: {exc}") from exc
+        raise click.ClickException(
+            f"Failed to read classification prompt file {classify_prompt_file}: {exc}"
+        ) from exc
+    try:
+        structure_prompt_value = resolve_prompt_text(structure_prompt, structure_prompt_file)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(
+            f"Failed to read structure prompt file {structure_prompt_file}: {exc}"
+        ) from exc
+    if structure_prompt_value is None:
+        structure_prompt_value = classification_prompt
     try:
         manager = ConfigManager()
         manager.ensure_exists()
@@ -1038,7 +1054,7 @@ def org(
             result = pipeline.run(
                 [source_root],
                 on_stage=_ingestion_stage if progress_enabled else None,
-                prompt=prompt,
+                prompt=classification_prompt,
             )
             if not dry_run and vision_captioner is not None:
                 vision_captioner.save_cache()
@@ -1093,11 +1109,11 @@ def org(
 
             classification_batch = run_classification(
                 result.processed,
-                prompt,
-                source_root,
-                dry_run,
-                config,
-                classification_cache,
+                classification_prompt=classification_prompt,
+                root=source_root,
+                dry_run=dry_run,
+                config=config,
+                cache=classification_cache,
                 on_progress=(
                     _classification_progress if progress_enabled and files_total else None
                 ),
@@ -1130,6 +1146,7 @@ def org(
                         descriptor_list,
                         decision_list,
                         source_root=source_root,
+                        prompt=structure_prompt_value,
                     )
                     if structure_task is not None:
                         structure_task.complete("Structure plan ready")
@@ -1232,7 +1249,10 @@ def org(
                 "destination_root": target_root.as_posix(),
                 "copy_mode": copy_mode,
                 "dry_run": dry_run,
-                "prompt": prompt,
+                "classification_prompt": classification_prompt,
+                "structure_prompt": structure_prompt_value,
+                # Backwards compatibility: retain legacy key.
+                "prompt": classification_prompt,
             },
             "counts": counts,
             "plan": plan.model_dump(mode="json"),
@@ -1576,8 +1596,10 @@ def org(
 @cli.command()
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, file_okay=False, path_type=str))
 @recursive_option("Include subdirectories for monitoring.")
-@prompt_file_option("Read extra classification guidance from a file.")
-@prompt_option("Provide extra classification guidance.")
+@classify_prompt_file_option("Read classification guidance from a text file.")
+@classify_prompt_option("Provide extra classification guidance.")
+@structure_prompt_file_option("Read extra structure instructions from a file.")
+@structure_prompt_option("Provide extra structure instructions.")
 @output_option("Destination root when copying organized files.")
 @dry_run_option("Preview actions without mutating files.")
 @click.option("--debounce", type=float, help="Override debounce interval in seconds.")
@@ -1595,8 +1617,10 @@ def watch(
     ctx: click.Context,
     paths: tuple[str, ...],
     recursive: bool,
-    prompt: str | None,
-    prompt_file: str | None,
+    classify_prompt: str | None,
+    classify_prompt_file: str | None,
+    structure_prompt: str | None,
+    structure_prompt_file: str | None,
     output: str | None,
     dry_run: bool,
     debounce: float | None,
@@ -1622,9 +1646,19 @@ def watch(
         raise click.ClickException("Provide at least one PATH to monitor.")
 
     try:
-        prompt = resolve_prompt_text(prompt, prompt_file)
+        classification_prompt = resolve_prompt_text(classify_prompt, classify_prompt_file)
     except (OSError, UnicodeDecodeError) as exc:
-        raise click.ClickException(f"Failed to read prompt file {prompt_file}: {exc}") from exc
+        raise click.ClickException(
+            f"Failed to read classification prompt file {classify_prompt_file}: {exc}"
+        ) from exc
+    try:
+        structure_prompt_value = resolve_prompt_text(structure_prompt, structure_prompt_file)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(
+            f"Failed to read structure prompt file {structure_prompt_file}: {exc}"
+        ) from exc
+    if structure_prompt_value is None:
+        structure_prompt_value = classification_prompt
 
     try:
         manager = ConfigManager()
@@ -1672,7 +1706,8 @@ def watch(
         service = WatchService(
             config,
             roots=root_paths,
-            prompt=prompt,
+            classification_prompt=classification_prompt,
+            structure_prompt=structure_prompt_value,
             output=output_path,
             dry_run=dry_run,
             recursive=recursive_enabled,

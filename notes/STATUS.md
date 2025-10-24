@@ -170,3 +170,9 @@
 - Added a GitHub Actions build badge to `README.md` so the CI status is visible from the project landing page.
 - Ran `uv run pre-commit run --all-files` (Ruff, Ruff format, MyPy, pytest) to validate the tree before committing.
 - Next actions: monitor the README badge after merge to confirm it renders the expected passing/failing state from `main`.
+
+## 2025-11-05
+- Threaded organizer prompts into `StructurePlanner.propose`, updated CLI call sites, and extended coverage/AGENTS/ARCH guidance so structure recommendations respect user instructions.
+- Next actions: run `uv run pytest tests/test_structure_planner.py` and `uv run pre-commit run --files src/dorgy/classification/structure.py tests/test_structure_planner.py` before opening the PR.
+- Introduced `--classify-prompt`/`--structure-prompt` (plus file variants) on `org`/`watch`, split prompt plumbing across classification and structure planning, refreshed docs/tests, and kept JSON compatibility via legacy `context.prompt`.
+- Next actions: execute `uv run pre-commit run --files src/dorgy/cli.py src/dorgy/cli_support.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
