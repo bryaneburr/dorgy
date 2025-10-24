@@ -27,11 +27,13 @@ dorgy org .
 dorgy org . -r
 
 # Organize the files in the current directory
-# with additional instructions
-dorgy org . -r --prompt "Ensure documents from the same tax year are grouped together"
+# with additional classification and structure instructions
+dorgy org . -r \
+  --classify-prompt "Highlight tax documents" \
+  --structure-prompt "Group files by tax year"
 
-# Supply additional instructions from a file
-dorgy org . --prompt-file prompts/tax-guidelines.txt
+# Supply classification instructions from a file
+dorgy org . --classify-prompt-file prompts/tax-guidelines.txt
 
 # Organize the ~/Downloads directory
 dorgy org ~/Downloads
@@ -55,8 +57,8 @@ dorgy org . --json
 dorgy watch .
 dorgy watch . -r --output some/folder # with options/flags
 
-# Watch a directory using instructions stored in a prompt file
-dorgy watch . --once --json --prompt-file prompts/watch-guidance.txt
+# Watch a directory using classification instructions stored in a prompt file
+dorgy watch . --once --json --classify-prompt-file prompts/watch-guidance.txt
 
 # Config
 dorgy config edit # edit config

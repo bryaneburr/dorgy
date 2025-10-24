@@ -151,7 +151,8 @@ class WatchService:
         config: DorgyConfig,
         *,
         roots: Iterable[Path],
-        prompt: Optional[str],
+        classification_prompt: Optional[str],
+        structure_prompt: Optional[str],
         output: Optional[Path],
         dry_run: bool,
         recursive: bool,
@@ -163,7 +164,8 @@ class WatchService:
         Args:
             config: Loaded Dorgy configuration.
             roots: Iterable of directory roots to monitor.
-            prompt: Optional classification prompt override.
+            classification_prompt: Optional classification prompt override.
+            structure_prompt: Optional structure planning prompt override.
             output: Optional destination root when operating in copy-mode.
             dry_run: Whether to avoid filesystem mutations.
             recursive: Whether to monitor subdirectories.
@@ -173,7 +175,8 @@ class WatchService:
         """
 
         self._config = config
-        self._prompt = prompt
+        self._classification_prompt = classification_prompt
+        self._structure_prompt = structure_prompt or classification_prompt
         self._roots = [root.expanduser().resolve() for root in roots]
         self._output = output.expanduser().resolve() if output else None
         self._dry_run = dry_run
@@ -513,18 +516,18 @@ class WatchService:
             )
 
             check_for_shutdown()
-            result = pipeline.run(ingestion_inputs, prompt=self._prompt)
+            result = pipeline.run(ingestion_inputs, prompt=self._classification_prompt)
             if not self._dry_run and vision_captioner is not None:
                 vision_captioner.save_cache()
             parallel_workers = max(1, self._config.processing.parallel_workers)
             check_for_shutdown()
             classification_batch = run_classification(
                 result.processed,
-                self._prompt,
-                source_root,
-                self._dry_run,
-                self._config,
-                cache,
+                classification_prompt=self._classification_prompt,
+                root=source_root,
+                dry_run=self._dry_run,
+                config=self._config,
+                cache=cache,
                 on_progress=None,
                 max_workers=parallel_workers,
             )
@@ -704,7 +707,10 @@ class WatchService:
                 "destination_root": target_root.as_posix(),
                 "copy_mode": self._copy_mode,
                 "dry_run": self._dry_run,
-                "prompt": self._prompt,
+                "classification_prompt": self._classification_prompt,
+                "structure_prompt": self._structure_prompt,
+                # Backwards compatibility: retain legacy key.
+                "prompt": self._classification_prompt,
                 "allow_deletions": self._allow_deletions,
                 "triggered_paths": [path.as_posix() for path in triggered_paths],
                 "started_at": batch_started_at.isoformat(),
