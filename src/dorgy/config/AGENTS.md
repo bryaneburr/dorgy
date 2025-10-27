@@ -10,3 +10,4 @@
 - `ambiguity.confidence_threshold` defaults to 0.60; watchers and CLI summary logic assume values below this require review, so update related fixtures when tuning it.
 - Current defaults enable vision captioning (`processing.process_images: true`) while keeping renaming opt-in (`organization.rename_files: false`); coordinate with ingestion/watch tests if these change.
 - Verbosity defaults live under the `cli` block (`quiet_default`, `summary_default`, `status_history_limit`); ensure docs/tests reflect changes and preserve precedence rules.
+- The `search` block controls Chromadb defaults (`default_limit`, `auto_enable_org`, `auto_enable_watch`, `embedding_function`). Embedding functions must be importable via `package.module:callable` (or dotted equivalent); validate strings early so CLI surfaces actionable errors rather than failing deep inside Chromadb.

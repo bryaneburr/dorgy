@@ -61,8 +61,8 @@ class SearchEntry:
         normalized_document = normalize_search_text(document, limit=limit)
         metadata: dict[str, Any] = {
             "path": record.path,
-            "tags": list(record.tags),
-            "categories": list(record.categories),
+            "tags": ", ".join(record.tags),
+            "categories": ", ".join(record.categories),
             "needs_review": record.needs_review,
             "hash": record.hash,
             "last_modified": record.last_modified.isoformat() if record.last_modified else None,
@@ -125,6 +125,19 @@ class SearchIndex:
             "documents": manifest.get("documents", 0),
             "updated_at": manifest.get("updated_at"),
         }
+
+    def initialize(self) -> None:
+        """Create backing directories and manifest when missing."""
+
+        with self._lock:
+            self._ensure_index_dir()
+            if not self._manifest_path.exists():
+                manifest = {
+                    "version": self._manifest_version,
+                    "documents": 0,
+                    "updated_at": None,
+                }
+                self._save_manifest(manifest)
 
     def upsert(
         self,

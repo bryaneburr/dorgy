@@ -89,6 +89,21 @@ def test_search_index_drop_removes_artifacts(tmp_path: Path) -> None:
     assert not manifest_path.exists()
 
 
+def test_search_index_initialize_creates_manifest(tmp_path: Path) -> None:
+    """initialize should ensure directories and manifest exist."""
+
+    index = SearchIndex(tmp_path)
+
+    index.initialize()
+
+    chroma_dir = tmp_path / ".dorgy" / "chroma"
+    manifest_path = tmp_path / ".dorgy" / "search.json"
+    assert chroma_dir.exists()
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["documents"] == 0
+
+
 def test_search_index_status_defaults(tmp_path: Path) -> None:
     """Status should return defaults when no artifacts exist."""
 

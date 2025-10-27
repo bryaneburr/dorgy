@@ -81,6 +81,12 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "StateRepository": ("dorgy.state", "StateRepository"),
     "WatchBatchResult": ("dorgy.watch", "WatchBatchResult"),
     "WatchService": ("dorgy.watch", "WatchService"),
+    "SearchEntry": ("dorgy.search", "SearchEntry"),
+    "SearchIndex": ("dorgy.search", "SearchIndex"),
+    "SearchIndexError": ("dorgy.search", "SearchIndexError"),
+    "ensure_index": ("dorgy.search.lifecycle", "ensure_index"),
+    "update_entries": ("dorgy.search.lifecycle", "update_entries"),
+    "descriptor_document_text": ("dorgy.search.text", "descriptor_document_text"),
 }
 
 
@@ -150,6 +156,36 @@ def _llm_summary(metadata: Mapping[str, Any]) -> str:
     if fallback is not None:
         parts.append(f"fallbacks={'enabled' if fallback else 'disabled'}")
     return ", ".join(parts)
+
+
+def _load_embedding_function(path: str | None) -> Any | None:
+    """Import and return a Chromadb embedding function specified by path."""
+
+    if not path:
+        return None
+    module_path: str
+    attr_name: str
+    if ":" in path:
+        module_path, attr_name = path.split(":", 1)
+    else:
+        module_path, _, attr_name = path.rpartition(".")
+    if not module_path or not attr_name:
+        raise click.ClickException(
+            "search.embedding_function must be formatted as 'package.module:callable' "
+            "or 'package.module.callable'."
+        )
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:  # pragma: no cover - defensive
+        raise click.ClickException(
+            f"Unable to import search embedding module '{module_path}': {exc}"
+        ) from exc
+    try:
+        return getattr(module, attr_name)
+    except AttributeError as exc:  # pragma: no cover - defensive
+        raise click.ClickException(
+            f"Embedding function '{attr_name}' not found in module '{module_path}'."
+        ) from exc
 
 
 class _ProgressTask:
@@ -827,6 +863,16 @@ def cli() -> None:
 @json_option("Emit JSON describing proposed changes.")
 @summary_option()
 @quiet_option()
+@click.option(
+    "--with-search",
+    is_flag=True,
+    help="Build or update the local search index after organization completes.",
+)
+@click.option(
+    "--without-search",
+    is_flag=True,
+    help="Skip search indexing for this run, overriding config and prior state.",
+)
 @click.pass_context
 def org(
     ctx: click.Context,
@@ -841,6 +887,8 @@ def org(
     json_output: bool,
     summary_mode: bool,
     quiet: bool,
+    with_search: bool,
+    without_search: bool,
 ) -> None:
     """Organize files rooted at PATH using the configured ingestion pipeline."""
 
@@ -891,6 +939,15 @@ def org(
     CollectionStateCls = _load_dependency("CollectionState", "dorgy.state", "CollectionState")
     StateRepositoryCls = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    SearchEntryCls = _load_dependency("SearchEntry", "dorgy.search", "SearchEntry")
+    SearchIndexError = _load_dependency("SearchIndexError", "dorgy.search", "SearchIndexError")
+    ensure_search_index = _load_dependency("ensure_index", "dorgy.search.lifecycle", "ensure_index")
+    update_search_entries = _load_dependency(
+        "update_entries", "dorgy.search.lifecycle", "update_entries"
+    )
+    descriptor_document_text = _load_dependency(
+        "descriptor_document_text", "dorgy.search.text", "descriptor_document_text"
+    )
 
     json_enabled = json_output
     mode: ModeResolution | None = None
@@ -908,6 +965,8 @@ def org(
         ) from exc
     if structure_prompt_value is None:
         structure_prompt_value = classification_prompt
+    if with_search and without_search:
+        raise click.ClickException("--with-search cannot be combined with --without-search.")
     try:
         manager = ConfigManager()
         manager.ensure_exists()
@@ -1433,6 +1492,13 @@ def org(
             state = repository.load(target_root)
         except MissingStateError:
             state = CollectionStateCls(root=str(target_root))
+        search_enabled = state.search.enabled
+        if with_search:
+            search_enabled = True
+        elif without_search:
+            search_enabled = False
+        elif not search_enabled and config.search.auto_enable_org:
+            search_enabled = True
 
         snapshot: dict[str, Any] | None = None
         if not dry_run:
@@ -1471,6 +1537,47 @@ def org(
 
             state.files.pop(old_relative, None)
             state.files[record.path] = record
+
+        state.search.enabled = search_enabled
+        if not search_enabled:
+            state.search.last_indexed_at = None
+        if search_enabled:
+            try:
+                embedding_function = _load_embedding_function(config.search.embedding_function)
+                search_index = ensure_search_index(
+                    target_root, state, embedding_function=embedding_function
+                )
+                search_entries: list[Any] = []
+                for _, descriptor in paired:
+                    document_text = descriptor_document_text(descriptor)
+                    if not document_text:
+                        continue
+                    final_relative = relative_to_collection(descriptor.path, target_root)
+                    record = state.files.get(final_relative)
+                    if record is None:
+                        continue
+                    entry = SearchEntryCls.from_record(
+                        record,
+                        document_text,
+                        extra_metadata={"mime_type": descriptor.mime_type, "source": "org"},
+                    )
+                    search_entries.append(entry)
+                update_search_entries(search_index, state, search_entries)
+                if search_entries and not json_output:
+                    _emit_message(
+                        f"[cyan]Indexed {len(search_entries)} document(s) for search.[/cyan]",
+                        mode="detail",
+                        quiet=quiet_enabled,
+                        summary_only=summary_only,
+                    )
+            except SearchIndexError as exc:
+                state.search.enabled = False
+                _emit_message(
+                    f"[yellow]Search indexing skipped: {exc}[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
 
         repository.save(target_root, state)
         if events:
