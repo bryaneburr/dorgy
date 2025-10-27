@@ -520,6 +520,7 @@ The project will progress through the following phases. Update the status column
 - Scaffolded the `dorgy.search` package with `SearchIndex`, `SearchEntry`, lifecycle helpers, and descriptor text normalization so Chromadb stores live under `<collection>/.dorgy/chroma`. Thread-safe initialize/upsert/delete/drop/status helpers keep manifests current and make unit tests possible via injectable client factories.
 - `dorgy org` now supports `--with-search/--without-search` (and honours `search.auto_enable_org`) to opt collections into Chromadb indexing immediately after plans are applied. Descriptor previews/vision captions feed directly into `SearchEntry` records, `.dorgy/search.json` manifests are updated, and CLI output notes how many documents were indexed.
 - `dorgy watch --once/--watch` gained matching search toggles, reusing the same lifecycle helpers to upsert newly organized files and delete entries when batch removals execute. Search state metadata stays in sync, manifests roll forward per batch, and `watch` notes surface Chromadb issues instead of failing runs.
+- `dorgy mv` now keeps Chromadb metadata aligned with renamed/moved files by refreshing path metadata in-place (no new embeddings). Search warnings surface through CLI notes and JSON payloads when Chromadb is unavailable.
 - Captured the detailed rollout plan in `notes/chromadb_search_plan.md`, covering document identity, ingestion payload normalization, CLI lifecycle controls, and UX/testing expectations.
 
 ### Next Actions

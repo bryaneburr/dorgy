@@ -86,6 +86,7 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "SearchIndexError": ("dorgy.search", "SearchIndexError"),
     "ensure_index": ("dorgy.search.lifecycle", "ensure_index"),
     "update_entries": ("dorgy.search.lifecycle", "update_entries"),
+    "refresh_metadata": ("dorgy.search.lifecycle", "refresh_metadata"),
     "descriptor_document_text": ("dorgy.search.text", "descriptor_document_text"),
 }
 
@@ -2376,6 +2377,11 @@ def mv(
     MoveOperation = _load_dependency("MoveOperation", "dorgy.organization.models", "MoveOperation")
     StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    SearchIndexError = _load_dependency("SearchIndexError", "dorgy.search", "SearchIndexError")
+    ensure_search_index = _load_dependency("ensure_index", "dorgy.search.lifecycle", "ensure_index")
+    refresh_search_metadata = _load_dependency(
+        "refresh_metadata", "dorgy.search.lifecycle", "refresh_metadata"
+    )
 
     json_enabled = json_output
     try:
@@ -2470,6 +2476,7 @@ def mv(
             "conflicts": 1 if conflict_applied else 0,
             "changes": 0,
         }
+        search_notes: list[str] = []
         changes: list[tuple[str, str]] = []
         events: list[OperationEvent] = []
 
@@ -2509,6 +2516,39 @@ def mv(
                     )
                     raise click.ClickException(failure_msg) from exc
                 _apply_state_changes(state, changes)
+                if state.search is None:
+                    from dorgy.state.models import SearchState
+
+                    state.search = SearchState()
+                if state.search.enabled:
+                    try:
+                        search_index = ensure_search_index(
+                            root,
+                            state,
+                            embedding_function=_load_embedding_function(
+                                config.search.embedding_function
+                            ),
+                        )
+                        records_to_refresh: list[tuple[Any, Mapping[str, Any] | None]] = []
+                        for _, new_key in changes:
+                            record = state.files.get(new_key)
+                            if record is None:
+                                continue
+                            records_to_refresh.append((record, {"source": "mv"}))
+                        refresh_search_metadata(search_index, state, records_to_refresh)
+                        if records_to_refresh and not json_output:
+                            _emit_message(
+                                (
+                                    "[cyan]Updated search metadata for "
+                                    f"{len(records_to_refresh)} file(s).[/cyan]"
+                                ),
+                                mode="detail",
+                                quiet=quiet_enabled,
+                                summary_only=summary_only,
+                            )
+                    except SearchIndexError as exc:
+                        state.search.enabled = False
+                        search_notes.append(f"Search indexing skipped: {exc}")
                 repository.save(root, state)
                 if events:
                     repository.append_history(root, events)
@@ -2531,8 +2571,10 @@ def mv(
             "plan": plan.model_dump(mode="json"),
             "changes": changes_payload,
         }
-        if plan.notes:
-            json_payload["notes"] = list(plan.notes)
+        combined_notes = list(plan.notes)
+        combined_notes.extend(search_notes)
+        if combined_notes:
+            json_payload["notes"] = combined_notes
         if events:
             json_payload["history"] = [event.model_dump(mode="json") for event in events]
         if not dry_run and not skipped_operation:
@@ -2570,14 +2612,14 @@ def mv(
                     summary_only=summary_only,
                 )
 
-            if plan.notes:
+            if combined_notes:
                 _emit_message(
                     "[yellow]Notes:[/yellow]",
                     mode="warning",
                     quiet=quiet_enabled,
                     summary_only=summary_only,
                 )
-                for entry in plan.notes:
+                for entry in combined_notes:
                     _emit_message(
                         f"  - {entry}",
                         mode="warning",

@@ -30,7 +30,7 @@
   - `dorgy watch`: `--with-search` opt-in, but also auto-detect existing search state and keep it updated. Watch batches call `SearchIndex.upsert` for processed files and `delete` when `allow_deletions` removes items.
   - `dorgy mv`: after state/history updates, call into the index to update metadata (no embedding recompute) so queries still resolve the renamed path.
 - Provide helper utilities (`dorgy.search.lifecycle.ensure_index()`, `update_entries()`, `drop_index()`) so org/watch/mv share code and keep `.dorgy/chroma` authoritative per collection.
-- Status: org + watch CLI hooks reuse the lifecycle helpers; next up are `mv` metadata sync and dedicated `dorgy search --init-store/--drop-store` plumbing.
+- Status: org + watch + mv reuse the lifecycle helpers; next up are `dorgy search --init-store/--drop-store` plumbing and Chromadb-backed query flags.
 
 ### 5. Search Command Enhancements
 - `dorgy search` should fail fast with a friendly message when `state.search.enabled` is false or `.dorgy/chroma` is missing, guiding users to initialize search via `dorgy org --with-search` or `dorgy search --init-store`.

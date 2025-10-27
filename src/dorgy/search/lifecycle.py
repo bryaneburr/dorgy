@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
-from dorgy.state import CollectionState, SearchState
+from dorgy.state import CollectionState, FileRecord, SearchState
 
 from .index import SearchEntry, SearchIndex
 
@@ -95,4 +95,23 @@ def drop_index(root: str | Path, state: CollectionState) -> None:
     state.search.last_indexed_at = None
 
 
-__all__ = ["ensure_index", "update_entries", "delete_entries", "drop_index"]
+def refresh_metadata(
+    index: SearchIndex,
+    state: CollectionState,
+    records: Sequence[tuple[FileRecord, Mapping[str, Any] | None]],
+) -> None:
+    """Update search metadata for existing records without re-indexing documents."""
+
+    if not records:
+        return
+    index.update_metadata(records)
+    state.search.last_indexed_at = datetime.now(timezone.utc)
+
+
+__all__ = [
+    "ensure_index",
+    "update_entries",
+    "delete_entries",
+    "refresh_metadata",
+    "drop_index",
+]

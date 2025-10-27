@@ -77,6 +77,7 @@ uv run dorgy status ./documents --json
 - **`dorgy mv`** – move or rename tracked files while preserving state history.
 - **`dorgy status` / `dorgy undo`** – inspect prior plans, audit history, and restore collections when needed.
 - **Per-run search toggles** – `dorgy org`/`dorgy watch` support `--with-search/--without-search` to control Chromadb indexing so collections stay portable and automation stays in sync.
+- **Search-aware moves** – `dorgy mv` keeps Chromadb metadata aligned with renamed files, so semantic search results stay accurate after refactors.
 - **Configuration commands** – `dorgy config view|set|edit` expose the full settings model.
 
 All commands accept `--json` for machine-readable output and share standardized error payloads so automation can script around them.

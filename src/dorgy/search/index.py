@@ -19,6 +19,24 @@ MANIFEST_FILENAME = "search.json"
 DEFAULT_COLLECTION_NAME = "dorgy-documents"
 
 
+def _build_metadata(
+    record: FileRecord,
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "path": record.path,
+        "tags": ", ".join(record.tags),
+        "categories": ", ".join(record.categories),
+        "needs_review": record.needs_review,
+        "hash": record.hash,
+        "last_modified": record.last_modified.isoformat() if record.last_modified else None,
+        "confidence": record.confidence,
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
+    return metadata
+
+
 class SearchIndexError(RuntimeError):
     """Raised when the search index cannot be created or accessed."""
 
@@ -46,30 +64,10 @@ class SearchEntry:
         limit: int = 4096,
         extra_metadata: Mapping[str, Any] | None = None,
     ) -> "SearchEntry":
-        """Build a search entry using a ``FileRecord`` as the metadata source.
-
-        Args:
-            record: File record describing the tracked file.
-            document: Text to persist inside Chromadb.
-            limit: Maximum characters retained from ``document`` after normalization.
-            extra_metadata: Optional metadata overrides/augmentations.
-
-        Returns:
-            SearchEntry: Prepared entry containing normalized text and metadata.
-        """
+        """Build a search entry using a ``FileRecord`` as the metadata source."""
 
         normalized_document = normalize_search_text(document, limit=limit)
-        metadata: dict[str, Any] = {
-            "path": record.path,
-            "tags": ", ".join(record.tags),
-            "categories": ", ".join(record.categories),
-            "needs_review": record.needs_review,
-            "hash": record.hash,
-            "last_modified": record.last_modified.isoformat() if record.last_modified else None,
-            "confidence": record.confidence,
-        }
-        if extra_metadata:
-            metadata.update(extra_metadata)
+        metadata = _build_metadata(record, extra_metadata)
         return cls(document_id=record.document_id, document=normalized_document, metadata=metadata)
 
 
@@ -168,6 +166,30 @@ class SearchIndex:
                 ids=ids,
                 total_documents=total_documents,
             )
+
+    def update_metadata(
+        self,
+        records: Sequence[tuple[FileRecord, Mapping[str, Any] | None]],
+    ) -> None:
+        """Update metadata for existing search entries without touching documents.
+
+        Args:
+            records: Sequence of (FileRecord, extra_metadata) tuples to refresh.
+        """
+
+        if not records:
+            return
+        collection = self._collection_handle()
+        ids: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        for record, extra in records:
+            ids.append(record.document_id)
+            metadatas.append(_build_metadata(record, extra))
+        with self._lock:
+            collection.update(ids=ids, metadatas=metadatas)
+            manifest = self._load_manifest()
+            manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+            self._save_manifest(manifest)
 
     def delete(
         self,
