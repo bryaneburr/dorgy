@@ -12,6 +12,7 @@
 - File records now carry persistent `document_id`s and collection-level `state.search` metadata; preserve these identifiers across org/watch/mv/undo flows so Chromadb indexes remain stable.
 - Chromadb storage must remain per-collection (`<root>/.dorgy/chroma` + `search.json` manifest). Keep automation toggles under the `search` config block (`default_limit`, `auto_enable_org`, `auto_enable_watch`, `embedding_function`) and document CLI/API expectations whenever new commands touch the index.
 - `dorgy org --with-search/--without-search` drives index enablement; ensure future commands that mutate files or state also update Chromadb and `state.search` consistently (including manifest counts and timestamps).
+- `dorgy watch` now mirrors the search toggles (`--with-search`/`--without-search`, `search.auto_enable_watch`) and must keep `.dorgy/chroma` + manifests accurate when batches add or remove files; propagate Chromadb warnings through CLI notes instead of failing silently.
 - Keep `ARCH.md` current as architecture or coordination patterns evolve; update the doc alongside substantive pipeline, module, or workflow changes.
 - PyPI distribution work must run on a feature branch, complete TestPyPI validation, and update SPEC Phase 9 plus `notes/STATUS.md` before tagging/releases.
 - CLI startup relies on lazy imports (`__getattr__` + `_load_dependency`); when adding new modules, extend the lazy map instead of reintroducing eager imports so `dorgy` remains responsive.

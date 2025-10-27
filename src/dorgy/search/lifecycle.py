@@ -51,9 +51,32 @@ def update_entries(
 
     if state.search is None:
         state.search = SearchState()
+    if not entries:
+        return
     index.upsert(entries, total_documents=len(state.files))
     state.search.last_indexed_at = datetime.now(timezone.utc)
     state.search.version = 1
+
+
+def delete_entries(
+    index: SearchIndex,
+    state: CollectionState,
+    document_ids: Sequence[str],
+) -> None:
+    """Remove search entries and refresh metadata on the collection state.
+
+    Args:
+        index: Initialized search index.
+        state: Collection state being updated.
+        document_ids: Document identifiers to delete.
+    """
+
+    if not document_ids:
+        return
+    if state.search is None:
+        state.search = SearchState()
+    index.delete(document_ids, total_documents=len(state.files))
+    state.search.last_indexed_at = datetime.now(timezone.utc)
 
 
 def drop_index(root: str | Path, state: CollectionState) -> None:
@@ -72,4 +95,4 @@ def drop_index(root: str | Path, state: CollectionState) -> None:
     state.search.last_indexed_at = None
 
 
-__all__ = ["ensure_index", "update_entries", "drop_index"]
+__all__ = ["ensure_index", "update_entries", "delete_entries", "drop_index"]

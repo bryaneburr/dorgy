@@ -1535,7 +1535,9 @@ def org(
 
             record = descriptor_to_record(descriptor, decision, target_root)
 
-            state.files.pop(old_relative, None)
+            previous_record = state.files.pop(old_relative, None)
+            if previous_record is not None:
+                record.document_id = previous_record.document_id
             state.files[record.path] = record
 
         state.search.enabled = search_enabled
@@ -1719,6 +1721,16 @@ def org(
     help="Allow watch runs to drop state entries when files are deleted or leave the collection.",
 )
 @click.option("--once", is_flag=True, help="Process current contents once and exit.")
+@click.option(
+    "--with-search",
+    is_flag=True,
+    help="Build or update the local search index after each watch batch.",
+)
+@click.option(
+    "--without-search",
+    is_flag=True,
+    help="Skip search indexing for watch batches, overriding config and prior state.",
+)
 @click.pass_context
 def watch(
     ctx: click.Context,
@@ -1736,6 +1748,8 @@ def watch(
     quiet: bool,
     allow_deletions: bool,
     once: bool,
+    with_search: bool,
+    without_search: bool,
 ) -> None:
     """Continuously monitor PATHS and organize changes as they arrive."""
 
@@ -1766,6 +1780,8 @@ def watch(
         ) from exc
     if structure_prompt_value is None:
         structure_prompt_value = classification_prompt
+    if with_search and without_search:
+        raise click.ClickException("--with-search cannot be combined with --without-search.")
 
     try:
         manager = ConfigManager()
@@ -1808,6 +1824,9 @@ def watch(
         raise click.ClickException("--output currently supports a single PATH.")
 
     recursive_enabled = recursive or config.processing.recurse_directories
+    embedding_function = None
+    if config.search.embedding_function:
+        embedding_function = _load_embedding_function(config.search.embedding_function)
 
     try:
         service = WatchService(
@@ -1820,6 +1839,9 @@ def watch(
             recursive=recursive_enabled,
             debounce_override=debounce,
             allow_deletions=allow_deletions_enabled,
+            with_search=with_search,
+            without_search=without_search,
+            embedding_function=embedding_function,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc

@@ -519,13 +519,14 @@ The project will progress through the following phases. Update the status column
 - Added a dedicated `search` block to `DorgyConfig` (default limit, auto-enable flags for `org`/`watch`, optional embedding overrides) while retaining `cli.search_default_limit` for backwards compatibility; CLI search already prefers the new defaults.
 - Scaffolded the `dorgy.search` package with `SearchIndex`, `SearchEntry`, lifecycle helpers, and descriptor text normalization so Chromadb stores live under `<collection>/.dorgy/chroma`. Thread-safe initialize/upsert/delete/drop/status helpers keep manifests current and make unit tests possible via injectable client factories.
 - `dorgy org` now supports `--with-search/--without-search` (and honours `search.auto_enable_org`) to opt collections into Chromadb indexing immediately after plans are applied. Descriptor previews/vision captions feed directly into `SearchEntry` records, `.dorgy/search.json` manifests are updated, and CLI output notes how many documents were indexed.
+- `dorgy watch --once/--watch` gained matching search toggles, reusing the same lifecycle helpers to upsert newly organized files and delete entries when batch removals execute. Search state metadata stays in sync, manifests roll forward per batch, and `watch` notes surface Chromadb issues instead of failing runs.
 - Captured the detailed rollout plan in `notes/chromadb_search_plan.md`, covering document identity, ingestion payload normalization, CLI lifecycle controls, and UX/testing expectations.
 
 ### Next Actions
 
-- Extend search lifecycle hooks to `dorgy watch` and `dorgy mv`, plus add CLI commands (`dorgy search --init-store/--drop-store/--contains`) that exercise the Chromadb index instead of state-only filters.
-- Ensure watch batches and manual reindex flows attach normalized document text or vision captions before indexing, update CLI JSON outputs to include `document_id` and Chromadb scores, and expand tests across org/watch/mv/search flows.
-- Document store lifecycle UX (initialization prompts, deletion guards) and update AGENTS/README/SPEC as additional commands land.
+- Extend the Chromadb lifecycle to `dorgy mv` (metadata updates without recomputing embeddings) and the `dorgy search` command (`--contains`, `--init-store`, `--drop-store`, `--reindex`) so automation can initialize/query indexes without running `org`.
+- Ensure watch/mv/search flows expose Chromadb-derived scores/document IDs in JSON outputs and add coverage for the new CLI switches.
+- Document store lifecycle UX (initialization prompts, deletion guards) as additional commands land.
 
 ## Phase 8 – Testing & Tooling
 

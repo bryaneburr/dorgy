@@ -24,6 +24,7 @@ def _env_with_home(tmp_path: Path) -> dict[str, str]:
     """
     env = dict(os.environ)
     env["HOME"] = str(tmp_path / "home")
+    env.setdefault("DORGY_USE_FALLBACKS", "1")
     return env
 
 
@@ -121,6 +122,59 @@ def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
     assert context["prompt"] == prompt_content
 
 
+def test_cli_watch_once_with_search(tmp_path: Path) -> None:
+    """`--with-search` should create the Chromadb artifacts for watch batches."""
+
+    root = tmp_path / "search"
+    root.mkdir()
+    (root / "alpha.txt").write_text("alpha", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(
+        cli,
+        ["watch", str(root), "--once", "--with-search"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    chroma_dir = root / ".dorgy" / "chroma"
+    manifest_path = root / ".dorgy" / "search.json"
+    assert chroma_dir.exists()
+    assert manifest_path.exists()
+    state = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))
+    assert state["search"]["enabled"] is True
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["documents"] >= 1
+
+
+def test_cli_watch_without_search_overrides_auto_enable(tmp_path: Path) -> None:
+    """`--without-search` should suppress indexing even when auto-enable is configured."""
+
+    root = tmp_path / "no-search"
+    root.mkdir()
+    (root / "beta.txt").write_text("beta", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("search:\n  auto_enable_watch: true\n", encoding="utf-8")
+
+    result = runner.invoke(
+        cli,
+        ["watch", str(root), "--once", "--without-search"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    chroma_dir = root / ".dorgy" / "chroma"
+    assert not chroma_dir.exists()
+    state = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))
+    assert state["search"]["enabled"] is False
+
+
 def _state_paths(root: Path) -> set[str]:
     """Return the set of tracked relative paths for ``root``."""
 
@@ -143,6 +197,9 @@ def _make_service(root: Path, *, allow_deletions: bool) -> WatchService:
         dry_run=False,
         recursive=False,
         allow_deletions=allow_deletions,
+        with_search=False,
+        without_search=False,
+        embedding_function=None,
     )
 
 

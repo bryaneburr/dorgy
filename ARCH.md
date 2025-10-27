@@ -56,7 +56,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### Watch Service (`src/dorgy/watch/service.py`)
 
-`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, CLI output helpers, and the shared shutdown event so Ctrl+C stops observers and queued work promptly.
+`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, CLI output helpers, the shared shutdown event, and (when enabled) reuse the search lifecycle helpers to upsert/delete Chromadb records after each batch.
 
 ### CLI Support & Shared Utilities
 
@@ -66,7 +66,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### Search Indexing (`src/dorgy/search/`)
 
-`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `initialize`, `upsert`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules (`normalize_search_text`, `descriptor_document_text`) so ingestion/watch/org pipelines sanitize previews before persisting them to Chromadb. `lifecycle.py` adds `ensure_index`/`update_entries`/`drop_index` helpers used by CLI flows to keep `.dorgy/chroma` authoritative whenever search is toggled. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
+`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `initialize`, `upsert`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules (`normalize_search_text`, `descriptor_document_text`) so ingestion/watch/org pipelines sanitize previews before persisting them to Chromadb. `lifecycle.py` adds `ensure_index`/`update_entries`/`delete_entries`/`drop_index` helpers used by CLI flows to keep `.dorgy/chroma` authoritative whenever search is toggled; both `dorgy org` and `dorgy watch` call into these helpers immediately after batches complete. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
 
 ## Data & Caching Layout
 
