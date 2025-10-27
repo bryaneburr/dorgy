@@ -15,6 +15,7 @@
 - **Hands-off organization** – classify, rename, and relocate files using DSPy-backed language models plus fast heuristic fallbacks.
 - **Continuous monitoring** – watch directories, batch changes, and export machine-readable summaries for downstream automation.
 - **Rich undo and audit history** – track every operation in `.dorgy/` so reorganizations remain reversible.
+- **Per-collection search stores** – Chromadb indexes live under `<collection>/.dorgy/chroma`, keeping semantic search portable without touching global config.
 - **Extensible foundation** – configuration is declarative, tests are automated via `uv`, and the roadmap is public.
 
 ---
@@ -86,7 +87,8 @@ All commands accept `--json` for machine-readable output and share standardized 
 - The primary config file lives at `~/.dorgy/config.yaml`; environment variables follow `DORGY__SECTION__KEY`.
 - `processing` governs ingestion behaviour (batch sizes, captioning, concurrency, size limits). `processing.process_images` is enabled by default to capture multimodal captions stored in `.dorgy/vision.json`.
 - `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation. Automatic renaming is disabled by default (`organization.rename_files: false`) so classification runs remain non-destructive unless you opt in.
-- `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (future releases will also surface search defaults).
+- `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (legacy configs may still surface `cli.search_default_limit`, but new installs should use the `search` block instead).
+- `search` governs Chromadb-backed indexing (default result limits, whether `org`/`watch` auto-maintain the store, and optional embedding function overrides) with artifacts stored next to `state.json` under `<collection>/.dorgy/chroma`.
 - Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
 - LLM models are configured through the `llm` block. The default target is `openai/gpt-5`; provide any LiteLLM-compatible identifier (for example `openai/gpt-4o-mini` or `openrouter/gpt-4o-mini:free`) via `llm.model`, supply `llm.api_key`/`llm.api_base_url` when required, and set `DORGY_USE_FALLBACKS=1` only when explicitly exercising heuristic classifiers in development.
 

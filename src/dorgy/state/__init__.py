@@ -7,9 +7,10 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from .errors import MissingStateError, StateError
-from .models import CollectionState, FileRecord, OperationEvent
+from .models import CollectionState, FileRecord, OperationEvent, SearchState
 
 DEFAULT_STATE_DIRNAME = ".dorgy"
 
@@ -57,7 +58,11 @@ class StateRepository:
         except json.JSONDecodeError as exc:
             raise StateError(f"Invalid collection state data: {exc}") from exc
 
-        return CollectionState.model_validate(data)
+        state = CollectionState.model_validate(data)
+        mutated = self._normalize_state(state)
+        if mutated:
+            self._persist_state(root, state, ensure_dirs=False, touch_updated=False)
+        return state
 
     def save(self, root: Path, state: CollectionState) -> None:
         """Persist collection state for the given root.
@@ -66,16 +71,8 @@ class StateRepository:
             root: Root path of the collection.
             state: State model to serialize to disk.
         """
-        directory = self.initialize(root)
-        now = datetime.now(timezone.utc)
-        state.updated_at = now
-        if state.created_at.tzinfo is None:
-            state.created_at = state.created_at.replace(tzinfo=timezone.utc)
-        payload = state.model_dump(mode="json")
-        (directory / "state.json").write_text(
-            json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8"
-        )
-        (directory / "dorgy.log").touch(exist_ok=True)
+        self._normalize_state(state)
+        self._persist_state(root, state, ensure_dirs=True, touch_updated=True)
 
     def append_history(self, root: Path, events: Iterable[OperationEvent]) -> None:
         """Append operation history events to the collection log.
@@ -189,12 +186,98 @@ class StateRepository:
         """
         return root / self._base_dirname
 
+    def _persist_state(
+        self,
+        root: Path,
+        state: CollectionState,
+        *,
+        ensure_dirs: bool,
+        touch_updated: bool,
+    ) -> None:
+        """Write the state JSON payload to disk.
+
+        Args:
+            root: Collection root path.
+            state: State model to serialize.
+            ensure_dirs: Whether supporting directories should be created.
+            touch_updated: Whether to bump ``updated_at`` to now.
+        """
+
+        directory = self.initialize(root) if ensure_dirs else self._state_dir(root)
+        if touch_updated:
+            updated_at = datetime.now(timezone.utc)
+        else:
+            normalized_updated = _ensure_timezone(state.updated_at)
+            if normalized_updated is None:
+                normalized_updated = datetime.now(timezone.utc)
+            updated_at = normalized_updated
+        state.updated_at = updated_at
+
+        normalized_created = _ensure_timezone(state.created_at)
+        if normalized_created is None:
+            normalized_created = updated_at
+        state.created_at = normalized_created
+        payload = state.model_dump(mode="json")
+        (directory / "state.json").write_text(
+            json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8"
+        )
+        (directory / "dorgy.log").touch(exist_ok=True)
+
+    def _normalize_state(self, state: CollectionState) -> bool:
+        """Normalize timestamps, search metadata, and document IDs.
+
+        Args:
+            state: Collection state loaded from disk.
+
+        Returns:
+            bool: ``True`` when mutations were applied.
+        """
+
+        mutated = False
+        normalized_created = _ensure_timezone(state.created_at) or state.created_at
+        if normalized_created is not state.created_at:
+            state.created_at = normalized_created
+            mutated = True
+        normalized_updated = _ensure_timezone(state.updated_at) or state.updated_at
+        if normalized_updated is not state.updated_at:
+            state.updated_at = normalized_updated
+            mutated = True
+
+        if state.search is None:
+            state.search = SearchState()
+            mutated = True
+        else:
+            normalized_indexed = _ensure_timezone(state.search.last_indexed_at)
+            if normalized_indexed is not state.search.last_indexed_at:
+                state.search.last_indexed_at = normalized_indexed
+                mutated = True
+
+        for record in state.files.values():
+            if not getattr(record, "document_id", None):
+                record.document_id = uuid4().hex
+                mutated = True
+            normalized_last_modified = _ensure_timezone(record.last_modified)
+            if normalized_last_modified is not record.last_modified:
+                record.last_modified = normalized_last_modified
+                mutated = True
+
+        return mutated
+
+
+def _ensure_timezone(value: datetime | None) -> datetime | None:
+    """Return a timezone-aware variant of ``value`` when available."""
+
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
 
 __all__ = [
     "StateRepository",
     "DEFAULT_STATE_DIRNAME",
     "CollectionState",
     "FileRecord",
+    "SearchState",
     "OperationEvent",
     "StateError",
     "MissingStateError",

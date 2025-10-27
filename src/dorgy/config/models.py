@@ -201,7 +201,6 @@ class CLIOptions(DorgyBaseModel):
         summary_default: Whether commands only print summary lines by default.
         status_history_limit: Default number of status history entries to display.
         progress_enabled: Whether progress indicators are rendered by default.
-        search_default_limit: Default result limit for ``dorgy search``.
         move_conflict_strategy: Default conflict resolution strategy for ``dorgy mv``.
     """
 
@@ -209,8 +208,27 @@ class CLIOptions(DorgyBaseModel):
     summary_default: bool = False
     status_history_limit: int = 5
     progress_enabled: bool = True
-    search_default_limit: int = 20
+    search_default_limit: Optional[int] = Field(
+        default=None,
+        description="Deprecated; use search.default_limit",
+    )
     move_conflict_strategy: Literal["append_number", "timestamp", "skip"] = "append_number"
+
+
+class SearchSettings(DorgyBaseModel):
+    """Search/index configuration options.
+
+    Attributes:
+        default_limit: Default result limit for ``dorgy search``.
+        auto_enable_org: Whether ``dorgy org`` should maintain search metadata automatically.
+        auto_enable_watch: Whether ``dorgy watch`` should update search indexes when enabled.
+        embedding_function: Optional dotted path to a Chromadb embedding factory.
+    """
+
+    default_limit: int = 20
+    auto_enable_org: bool = False
+    auto_enable_watch: bool = False
+    embedding_function: Optional[str] = None
 
 
 class DorgyConfig(DorgyBaseModel):
@@ -224,6 +242,7 @@ class DorgyConfig(DorgyBaseModel):
         logging: Logging configuration.
         cli: CLI presentation defaults.
         rules: List of dynamic rule definitions.
+        search: Search/index settings.
     """
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
@@ -232,6 +251,7 @@ class DorgyConfig(DorgyBaseModel):
     ambiguity: AmbiguitySettings = Field(default_factory=AmbiguitySettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     cli: CLIOptions = Field(default_factory=CLIOptions)
+    search: SearchSettings = Field(default_factory=SearchSettings)
     rules: List[dict] = Field(default_factory=list)
 
 
@@ -246,5 +266,6 @@ __all__ = [
     "AmbiguitySettings",
     "LoggingSettings",
     "CLIOptions",
+    "SearchSettings",
     "DorgyConfig",
 ]

@@ -2004,7 +2004,11 @@ def search(
         summary_only = mode.summary
         json_enabled = mode.json_output
 
-        effective_limit = limit if limit is not None else config.cli.search_default_limit
+        default_limit = config.search.default_limit
+        legacy_limit = config.cli.search_default_limit
+        if legacy_limit is not None:
+            default_limit = legacy_limit
+        effective_limit = limit if limit is not None else default_limit
         if effective_limit is not None and effective_limit <= 0:
             raise click.ClickException("--limit must be greater than zero.")
 

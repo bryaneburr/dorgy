@@ -52,7 +52,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### State & History (`src/dorgy/state/`)
 
-`StateRepository` encapsulates persistence inside `.dorgy/`, storing `CollectionState` (per-file metadata, tags, categories, confidence, needs-review flags), original structure snapshots (`orig.json`), history logs (`history.jsonl`), and rolling notes/needs-review/quarantine subdirectories. Errors raise `StateError`/`MissingStateError`. State is the backbone for search, status, move, and undo commands and for watch batch summaries.
+`StateRepository` encapsulates persistence inside `.dorgy/`, storing `CollectionState` (per-file metadata, stable `document_id`s for Chromadb, tags, categories, confidence, needs-review flags, and search metadata), original structure snapshots (`orig.json`), history logs (`history.jsonl`), `.dorgy/search.json` manifests, and rolling notes/needs-review/quarantine subdirectories. Legacy payloads are migrated in-place so timestamps become timezone-aware and missing IDs are backfilled. Errors raise `StateError`/`MissingStateError`. State is the backbone for search, status, move, and undo commands and for watch batch summaries.
 
 ### Watch Service (`src/dorgy/watch/service.py`)
 
@@ -64,6 +64,10 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 - `cli_options.py` &mdash; consolidated Click option decorators so commands stay aligned with global UX.
 - `classification/vision.py` &mdash; integrates image captioning, caching captions in `.dorgy/vision.json` and respecting prompts forwarded from the CLI.
 
+### Search Indexing (`src/dorgy/search/`)
+
+`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `upsert`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules so ingestion/watch/org pipelines sanitize previews before persisting them to Chromadb. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
+
 ## Data & Caching Layout
 
 - `.dorgy/state.json` &mdash; serialized `CollectionState` for the collection root.
@@ -73,6 +77,8 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 - `.dorgy/classifications.json` &mdash; persisted decision cache, enabling incremental runs.
 - `.dorgy/vision.json` &mdash; cached image captions to avoid redundant model calls.
 - `.dorgy/needs-review/` and `.dorgy/quarantine/` &mdash; holding areas for files that need manual attention or were isolated by the pipeline.
+- `.dorgy/chroma/` &mdash; per-collection Chromadb store managed by `dorgy.search.index.SearchIndex`.
+- `.dorgy/search.json` &mdash; manifest describing search enablement, schema version, and document counts for CLI health checks.
 
 ## Automation & Tooling Surface
 

@@ -320,7 +320,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
 | [ ] | Phase 5.8 – Vision-Enriched Classification | Leverage `processing.process_images` to capture captions/tags, enrich descriptors with image summaries, extend classifier/tests/docs |
 | [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
-| [ ] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
+| [~] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [~] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
 | [~] | Phase 9 – Distribution & Release Prep | PyPI metadata polish, TestPyPI validation, release documentation, CI gating for publishing |
 
@@ -506,12 +506,25 @@ The project will progress through the following phases. Update the status column
 
 ## Phase 6 – CLI Surface
 
-- Introduced `dorgy search` with glob, tag, category, needs-review, and date-range filters plus JSON output that mirrors prior CLI schemas; defaults (including result limits) honor `cli.search_default_limit`.
+- Introduced `dorgy search` with glob, tag, category, needs-review, and date-range filters plus JSON output that mirrors prior CLI schemas; defaults (including result limits) honor `search.default_limit` (falling back to `cli.search_default_limit` for legacy configs).
 - Implemented `dorgy mv` using the organization executor to preserve staging/rollback guarantees while updating state/history; supports dry-run, JSON payloads, and configurable conflict strategies (append number, timestamp, skip).
 - Added Rich-powered progress indicators for `dorgy org` and `dorgy watch --once`, automatically disabled for JSON/quiet/non-TTY contexts and controllable via `cli.progress_enabled`.
-- Expanded CLI configuration with `cli.move_conflict_strategy` and `cli.search_default_limit` so automation can tune defaults, alongside the new `cli.progress_enabled` toggle for UI instrumentation.
+- Expanded CLI configuration with `cli.move_conflict_strategy`, `search.default_limit`, and `cli.progress_enabled` so automation can tune defaults while Chromadb goes live without breaking older configs.
 - Watch JSON context now records `started_at`, `completed_at`, and `duration_seconds` alongside `batch_id`, enabling downstream automation to correlate processing timelines.
 - Configurable concurrency (`processing.parallel_workers`) allows ingestion and classification batches to issue multiple calls in parallel while logging per-request timings for diagnosis.
+
+## Phase 7 – Search & Metadata APIs
+
+- Extended `FileRecord` with persistent `document_id`s (backfilled on load) plus collection-level `search` metadata to record enablement, schema versions, and last indexing timestamps. `StateRepository` now normalizes timestamps to UTC, rewrites migrated payloads, and keeps `.dorgy/search.json` in sync with Chromadb manifests.
+- Added a dedicated `search` block to `DorgyConfig` (default limit, auto-enable flags for `org`/`watch`, optional embedding overrides) while retaining `cli.search_default_limit` for backwards compatibility; CLI search already prefers the new defaults.
+- Scaffolded the `dorgy.search` package with `SearchIndex`, `SearchEntry`, and normalization helpers so Chromadb stores live under `<collection>/.dorgy/chroma`. Thread-safe upsert/delete/drop/status helpers keep manifests current and make unit tests possible via injectable client factories.
+- Captured the detailed rollout plan in `notes/chromadb_search_plan.md`, covering document identity, ingestion payload normalization, CLI lifecycle controls, and UX/testing expectations.
+
+### Next Actions
+
+- Wire `SearchIndex` into `org`, `watch`, `mv`, and `search` commands (including CLI flags such as `--with-search`, `--init-store`, `--drop-store`, and `--contains`).
+- Ensure ingestion/watch pipelines attach normalized document text or vision captions before indexing, update CLI JSON outputs to include `document_id` and Chromadb scores, and expand tests across org/watch/mv/search flows.
+- Document store lifecycle UX (initialization prompts, deletion guards) and update AGENTS/README once the command surface is live.
 
 ## Phase 8 – Testing & Tooling
 

@@ -9,6 +9,8 @@
 - CLI commands share summary/quiet helpers and standardized JSON error payloads; extend those utilities when adding new commands and update tests accordingly.
 - The watch service must reuse the organization pipeline helpers and surface batches via the shared CLI output helpers and JSON schema.
 - Destructive watch removals are guarded by `processing.watch.allow_deletions`/`--allow-deletions`; when opt-out, suppress deletions but emit notes/JSON entries so automation can triage.
+- File records now carry persistent `document_id`s and collection-level `state.search` metadata; preserve these identifiers across org/watch/mv/undo flows so Chromadb indexes remain stable.
+- Chromadb storage must remain per-collection (`<root>/.dorgy/chroma` + `search.json` manifest). Keep automation toggles under the `search` config block (`default_limit`, `auto_enable_org`, `auto_enable_watch`, `embedding_function`) and document CLI/API expectations whenever new commands touch the index.
 - Keep `ARCH.md` current as architecture or coordination patterns evolve; update the doc alongside substantive pipeline, module, or workflow changes.
 - PyPI distribution work must run on a feature branch, complete TestPyPI validation, and update SPEC Phase 9 plus `notes/STATUS.md` before tagging/releases.
 - CLI startup relies on lazy imports (`__getattr__` + `_load_dependency`); when adding new modules, extend the lazy map instead of reintroducing eager imports so `dorgy` remains responsive.
