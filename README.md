@@ -1,7 +1,6 @@
 [![CI](https://github.com/bryaneburr/dorgy/actions/workflows/ci.yml/badge.svg)](https://github.com/bryaneburr/dorgy/actions/workflows/ci.yml)
 ![PyPI - Version](https://img.shields.io/pypi/v/dorgy)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/dorgy)
-![PyPI - Status](https://img.shields.io/pypi/status/dorgy)
 ![GitHub License](https://img.shields.io/github/license/bryaneburr/dorgy)
 
 
