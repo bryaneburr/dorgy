@@ -81,6 +81,14 @@ _LAZY_ATTRS: dict[str, tuple[str, str]] = {
     "StateRepository": ("dorgy.state", "StateRepository"),
     "WatchBatchResult": ("dorgy.watch", "WatchBatchResult"),
     "WatchService": ("dorgy.watch", "WatchService"),
+    "SearchEntry": ("dorgy.search", "SearchEntry"),
+    "SearchIndex": ("dorgy.search", "SearchIndex"),
+    "SearchIndexError": ("dorgy.search", "SearchIndexError"),
+    "ensure_index": ("dorgy.search.lifecycle", "ensure_index"),
+    "update_entries": ("dorgy.search.lifecycle", "update_entries"),
+    "refresh_metadata": ("dorgy.search.lifecycle", "refresh_metadata"),
+    "drop_index": ("dorgy.search.lifecycle", "drop_index"),
+    "descriptor_document_text": ("dorgy.search.text", "descriptor_document_text"),
 }
 
 
@@ -150,6 +158,51 @@ def _llm_summary(metadata: Mapping[str, Any]) -> str:
     if fallback is not None:
         parts.append(f"fallbacks={'enabled' if fallback else 'disabled'}")
     return ", ".join(parts)
+
+
+def _load_embedding_function(path: str | None) -> Any | None:
+    """Import and return a Chromadb embedding function specified by path."""
+
+    if not path:
+        return None
+    module_path: str
+    attr_name: str
+    if ":" in path:
+        module_path, attr_name = path.split(":", 1)
+    else:
+        module_path, _, attr_name = path.rpartition(".")
+    if not module_path or not attr_name:
+        raise click.ClickException(
+            "search.embedding_function must be formatted as 'package.module:callable' "
+            "or 'package.module.callable'."
+        )
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:  # pragma: no cover - defensive
+        raise click.ClickException(
+            f"Unable to import search embedding module '{module_path}': {exc}"
+        ) from exc
+    try:
+        return getattr(module, attr_name)
+    except AttributeError as exc:  # pragma: no cover - defensive
+        raise click.ClickException(
+            f"Embedding function '{attr_name}' not found in module '{module_path}'."
+        ) from exc
+
+
+def _format_modified_timestamp(value: datetime | None) -> str:
+    """Return a user-friendly timestamp (e.g., 'Mar 7 2024, 12:30PM')."""
+
+    if value is None:
+        return "-"
+    ts = value
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone()
+    hour = int(ts.strftime("%I"))
+    minute = ts.strftime("%M")
+    period = ts.strftime("%p")
+    return f"{ts.strftime('%b')} {ts.day} {ts.year}, {hour}:{minute}{period}"
 
 
 class _ProgressTask:
@@ -827,6 +880,16 @@ def cli() -> None:
 @json_option("Emit JSON describing proposed changes.")
 @summary_option()
 @quiet_option()
+@click.option(
+    "--with-search",
+    is_flag=True,
+    help="Build or update the local search index after organization completes.",
+)
+@click.option(
+    "--without-search",
+    is_flag=True,
+    help="Skip search indexing for this run, overriding config and prior state.",
+)
 @click.pass_context
 def org(
     ctx: click.Context,
@@ -841,6 +904,8 @@ def org(
     json_output: bool,
     summary_mode: bool,
     quiet: bool,
+    with_search: bool,
+    without_search: bool,
 ) -> None:
     """Organize files rooted at PATH using the configured ingestion pipeline."""
 
@@ -891,6 +956,15 @@ def org(
     CollectionStateCls = _load_dependency("CollectionState", "dorgy.state", "CollectionState")
     StateRepositoryCls = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    SearchEntryCls = _load_dependency("SearchEntry", "dorgy.search", "SearchEntry")
+    SearchIndexError = _load_dependency("SearchIndexError", "dorgy.search", "SearchIndexError")
+    ensure_search_index = _load_dependency("ensure_index", "dorgy.search.lifecycle", "ensure_index")
+    update_search_entries = _load_dependency(
+        "update_entries", "dorgy.search.lifecycle", "update_entries"
+    )
+    descriptor_document_text = _load_dependency(
+        "descriptor_document_text", "dorgy.search.text", "descriptor_document_text"
+    )
 
     json_enabled = json_output
     mode: ModeResolution | None = None
@@ -908,6 +982,8 @@ def org(
         ) from exc
     if structure_prompt_value is None:
         structure_prompt_value = classification_prompt
+    if with_search and without_search:
+        raise click.ClickException("--with-search cannot be combined with --without-search.")
     try:
         manager = ConfigManager()
         manager.ensure_exists()
@@ -1433,6 +1509,13 @@ def org(
             state = repository.load(target_root)
         except MissingStateError:
             state = CollectionStateCls(root=str(target_root))
+        search_enabled = state.search.enabled
+        if with_search:
+            search_enabled = True
+        elif without_search:
+            search_enabled = False
+        elif not search_enabled and config.search.auto_enable_org:
+            search_enabled = True
 
         snapshot: dict[str, Any] | None = None
         if not dry_run:
@@ -1469,8 +1552,51 @@ def org(
 
             record = descriptor_to_record(descriptor, decision, target_root)
 
-            state.files.pop(old_relative, None)
+            previous_record = state.files.pop(old_relative, None)
+            if previous_record is not None:
+                record.document_id = previous_record.document_id
             state.files[record.path] = record
+
+        state.search.enabled = search_enabled
+        if not search_enabled:
+            state.search.last_indexed_at = None
+        if search_enabled:
+            try:
+                embedding_function = _load_embedding_function(config.search.embedding_function)
+                search_index = ensure_search_index(
+                    target_root, state, embedding_function=embedding_function
+                )
+                search_entries: list[Any] = []
+                for _, descriptor in paired:
+                    document_text = descriptor_document_text(descriptor)
+                    if not document_text:
+                        continue
+                    final_relative = relative_to_collection(descriptor.path, target_root)
+                    record = state.files.get(final_relative)
+                    if record is None:
+                        continue
+                    entry = SearchEntryCls.from_record(
+                        record,
+                        document_text,
+                        extra_metadata={"mime_type": descriptor.mime_type, "source": "org"},
+                    )
+                    search_entries.append(entry)
+                update_search_entries(search_index, state, search_entries)
+                if search_entries and not json_output:
+                    _emit_message(
+                        f"[cyan]Indexed {len(search_entries)} document(s) for search.[/cyan]",
+                        mode="detail",
+                        quiet=quiet_enabled,
+                        summary_only=summary_only,
+                    )
+            except SearchIndexError as exc:
+                state.search.enabled = False
+                _emit_message(
+                    f"[yellow]Search indexing skipped: {exc}[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
 
         repository.save(target_root, state)
         if events:
@@ -1612,6 +1738,16 @@ def org(
     help="Allow watch runs to drop state entries when files are deleted or leave the collection.",
 )
 @click.option("--once", is_flag=True, help="Process current contents once and exit.")
+@click.option(
+    "--with-search",
+    is_flag=True,
+    help="Build or update the local search index after each watch batch.",
+)
+@click.option(
+    "--without-search",
+    is_flag=True,
+    help="Skip search indexing for watch batches, overriding config and prior state.",
+)
 @click.pass_context
 def watch(
     ctx: click.Context,
@@ -1629,6 +1765,8 @@ def watch(
     quiet: bool,
     allow_deletions: bool,
     once: bool,
+    with_search: bool,
+    without_search: bool,
 ) -> None:
     """Continuously monitor PATHS and organize changes as they arrive."""
 
@@ -1659,6 +1797,8 @@ def watch(
         ) from exc
     if structure_prompt_value is None:
         structure_prompt_value = classification_prompt
+    if with_search and without_search:
+        raise click.ClickException("--with-search cannot be combined with --without-search.")
 
     try:
         manager = ConfigManager()
@@ -1701,6 +1841,9 @@ def watch(
         raise click.ClickException("--output currently supports a single PATH.")
 
     recursive_enabled = recursive or config.processing.recurse_directories
+    embedding_function = None
+    if config.search.embedding_function:
+        embedding_function = _load_embedding_function(config.search.embedding_function)
 
     try:
         service = WatchService(
@@ -1713,6 +1856,9 @@ def watch(
             recursive=recursive_enabled,
             debounce_override=debounce,
             allow_deletions=allow_deletions_enabled,
+            with_search=with_search,
+            without_search=without_search,
+            embedding_function=embedding_function,
         )
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
@@ -1963,6 +2109,14 @@ def config_edit() -> None:
     show_default=False,
     help="Maximum number of results to return (defaults to configuration).",
 )
+@click.option("--contains", type=str, help="Substring filter for document contents.")
+@click.option("--init-store", is_flag=True, help="Rebuild the Chromadb store from disk.")
+@click.option("--drop-store", is_flag=True, help="Delete the Chromadb store and disable search.")
+@click.option(
+    "--reindex",
+    is_flag=True,
+    help="Drop and rebuild the Chromadb store for the collection.",
+)
 @json_option("Emit search results as JSON.")
 @summary_option()
 @quiet_option()
@@ -1978,6 +2132,10 @@ def search(
     after: str | None,
     needs_review: bool | None,
     limit: int | None,
+    contains: str | None,
+    init_store: bool,
+    drop_store: bool,
+    reindex: bool,
     json_output: bool,
     summary_mode: bool,
     quiet: bool,
@@ -1986,12 +2144,22 @@ def search(
 
     StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    SearchIndexError = _load_dependency("SearchIndexError", "dorgy.search", "SearchIndexError")
 
     json_enabled = json_output
     try:
         manager = ConfigManager()
         manager.ensure_exists()
         config = manager.load()
+
+        if init_store and drop_store:
+            raise click.ClickException("--init-store cannot be combined with --drop-store.")
+        if reindex and drop_store:
+            raise click.ClickException("--reindex cannot be combined with --drop-store.")
+        if reindex and init_store:
+            raise click.ClickException("--reindex cannot be combined with --init-store.")
+        if query and contains:
+            raise click.ClickException("--search cannot be combined with --contains.")
 
         mode: ModeResolution = resolve_mode_settings(
             ctx,
@@ -2004,7 +2172,11 @@ def search(
         summary_only = mode.summary
         json_enabled = mode.json_output
 
-        effective_limit = limit if limit is not None else config.cli.search_default_limit
+        default_limit = config.search.default_limit
+        legacy_limit = config.cli.search_default_limit
+        if legacy_limit is not None:
+            default_limit = legacy_limit
+        effective_limit = limit if limit is not None else default_limit
         if effective_limit is not None and effective_limit <= 0:
             raise click.ClickException("--limit must be greater than zero.")
 
@@ -2024,11 +2196,314 @@ def search(
         repository = StateRepository()
         state = repository.load(root)
 
+        search_state = getattr(state, "search", None)
+        search_enabled = bool(search_state.enabled) if search_state is not None else False
+
+        if not search_enabled and not (init_store or reindex):
+            raise click.ClickException(
+                "Search index is disabled for this collection. "
+                "Run `dorgy search --init-store` or `dorgy org --with-search` first."
+            )
+
+        records_by_normalized: dict[str, FileRecord] = {}
+        records_by_document_id: dict[str, FileRecord] = {}
+        for key, record in state.files.items():
+            normalized_key = _normalise_state_key(key)
+            records_by_normalized[normalized_key] = record
+            records_by_document_id[record.document_id] = record
+
+        search_notes: list[str] = []
+        search_warnings: list[str] = []
+        snippet_by_id: dict[str, str] = {}
+        score_by_id: dict[str, float | None] = {}
+        distance_by_id: dict[str, float | None] = {}
+        space_by_id: dict[str, str | None] = {}
+        search_status: dict[str, Any] | None = None
+        embedding_function = _load_embedding_function(config.search.embedding_function)
+        search_index: Any | None = None
+
+        if drop_store:
+            drop_search_index = _load_dependency(
+                "drop_index", "dorgy.search.lifecycle", "drop_index"
+            )
+            drop_search_index(root, state)
+            repository.save(root, state)
+            search_notes.append("Search index dropped; state marked as search-disabled.")
+            search_enabled = False
+
+        if reindex:
+            SearchIndexCls = _load_dependency("SearchIndex", "dorgy.search", "SearchIndex")
+            existing_index = SearchIndexCls(root, embedding_function=embedding_function)
+            if existing_index.index_path.exists():
+                doc_ids = [record.document_id for record in state.files.values()]
+                try:
+                    existing_index.delete(doc_ids)
+                    search_notes.append(
+                        f"Cleared {len(doc_ids)} document(s) before reindex."
+                        if doc_ids
+                        else "Cleared existing search index before reindex."
+                    )
+                except SearchIndexError as exc:
+                    search_warnings.append(f"Unable to clear existing index before reindex: {exc}")
+            init_store = True
+
+        if init_store:
+            SearchEntryCls = _load_dependency("SearchEntry", "dorgy.search", "SearchEntry")
+            ensure_search_index = _load_dependency(
+                "ensure_index", "dorgy.search.lifecycle", "ensure_index"
+            )
+            update_search_entries = _load_dependency(
+                "update_entries", "dorgy.search.lifecycle", "update_entries"
+            )
+            descriptor_document_text = _load_dependency(
+                "descriptor_document_text", "dorgy.search.text", "descriptor_document_text"
+            )
+            DirectoryScannerCls = _load_dependency(
+                "DirectoryScanner", "dorgy.ingestion.discovery", "DirectoryScanner"
+            )
+            TypeDetectorCls = _load_dependency(
+                "TypeDetector", "dorgy.ingestion.detectors", "TypeDetector"
+            )
+            HashComputerCls = _load_dependency(
+                "HashComputer", "dorgy.ingestion.detectors", "HashComputer"
+            )
+            MetadataExtractorCls = _load_dependency(
+                "MetadataExtractor", "dorgy.ingestion.extractors", "MetadataExtractor"
+            )
+            IngestionPipelineCls = _load_dependency(
+                "IngestionPipeline", "dorgy.ingestion", "IngestionPipeline"
+            )
+            VisionCaptionerCls = _load_dependency(
+                "VisionCaptioner", "dorgy.classification", "VisionCaptioner"
+            )
+            VisionCacheCls = _load_dependency("VisionCache", "dorgy.classification", "VisionCache")
+
+            search_index = ensure_search_index(root, state, embedding_function=embedding_function)
+            search_enabled = True
+
+            vision_captioner: Any | None = None
+            vision_warning: str | None = None
+            vision_cache: Any | None = None
+            state_dir = root / ".dorgy"
+            if config.processing.process_images:
+                vision_cache = VisionCacheCls(state_dir / "vision.json")
+                try:
+                    vision_cache.load()
+                except OSError as exc:
+                    search_warnings.append(f"Unable to load vision cache: {exc}")
+                try:
+                    vision_captioner = VisionCaptionerCls(config.llm, cache=vision_cache)
+                except RuntimeError as exc:
+                    vision_warning = f"Vision captioning disabled: {exc}"
+                    LOGGER.warning("%s", vision_warning)
+                    vision_captioner = None
+            if vision_warning:
+                search_warnings.append(vision_warning)
+
+            max_size_bytes = None
+            if config.processing.max_file_size_mb > 0:
+                max_size_bytes = config.processing.max_file_size_mb * 1024 * 1024
+
+            scanner = DirectoryScannerCls(
+                recursive=True,
+                include_hidden=config.processing.process_hidden_files,
+                follow_symlinks=config.processing.follow_symlinks,
+                max_size_bytes=max_size_bytes,
+            )
+            extractor = MetadataExtractorCls(
+                preview_char_limit=config.processing.preview_char_limit
+            )
+            pipeline = IngestionPipelineCls(
+                scanner=scanner,
+                detector=TypeDetectorCls(),
+                hasher=HashComputerCls(),
+                extractor=extractor,
+                processing=config.processing,
+                staging_dir=None,
+                allow_writes=False,
+                vision_captioner=vision_captioner,
+            )
+
+            ingestion_result = pipeline.run([root])
+            if vision_captioner is not None:
+                try:
+                    vision_captioner.save_cache()
+                except OSError as exc:
+                    search_warnings.append(f"Unable to persist vision cache: {exc}")
+
+            search_entries: list[Any] = []
+            skipped_previews = 0
+            relative_to_collection = _load_dependency(
+                "relative_to_collection", "dorgy.cli_support", "relative_to_collection"
+            )
+
+            for descriptor in ingestion_result.processed:
+                relative = relative_to_collection(descriptor.path, root)
+                normalized = _normalise_state_key(relative)
+                record = records_by_normalized.get(normalized)
+                if record is None:
+                    continue
+                document_text = descriptor_document_text(descriptor)
+                if not document_text:
+                    skipped_previews += 1
+                    continue
+                entry = SearchEntryCls.from_record(
+                    record,
+                    document_text,
+                    extra_metadata={
+                        "mime_type": descriptor.mime_type,
+                        "source": "search-init",
+                    },
+                )
+                search_entries.append(entry)
+
+            if search_entries:
+                update_search_entries(search_index, state, search_entries)
+                repository.save(root, state)
+                if reindex:
+                    search_notes.append(
+                        f"Reindexed {len(search_entries)} document(s) via --reindex."
+                    )
+                else:
+                    search_notes.append(
+                        f"Indexed {len(search_entries)} document(s) via --init-store."
+                    )
+            else:
+                if reindex:
+                    search_notes.append("No search entries generated during --reindex.")
+                else:
+                    search_notes.append("No search entries generated during --init-store.")
+
+            if skipped_previews:
+                search_warnings.append(
+                    f"{skipped_previews} file(s) lacked preview content during index rebuild."
+                )
+
+        if search_index is None and state.search.enabled:
+            SearchIndexCls = _load_dependency("SearchIndex", "dorgy.search", "SearchIndex")
+            candidate_index = SearchIndexCls(root, embedding_function=embedding_function)
+            if candidate_index.index_path.exists():
+                search_index = candidate_index
+            else:
+                warning_text = (
+                    "Search metadata indicates the index is enabled, "
+                    "but Chromadb artifacts were not found. "
+                    "Rebuild the index with `dorgy search --init-store`."
+                )
+                if contains:
+                    raise click.ClickException(
+                        "Substring filtering requires an existing Chromadb index. "
+                        "Run `dorgy search --init-store` or `dorgy org --with-search` "
+                        "to create one."
+                    )
+                search_warnings.append(warning_text)
+
+        if search_index is None and not drop_store:
+            candidate_index = _load_dependency("SearchIndex", "dorgy.search", "SearchIndex")(
+                root, embedding_function=embedding_function
+            )
+            if not candidate_index.index_path.exists():
+                raise click.ClickException(
+                    "Search index has not been initialised for this collection. "
+                    "Run `dorgy search --init-store` or `dorgy org --with-search` first."
+                )
+            search_index = candidate_index
+
+        if search_index is not None:
+            search_status = search_index.status()
+
+        semantic_mode = query is not None and query.strip() != ""
+
+        if drop_store and (semantic_mode or contains):
+            raise click.ClickException(
+                "--drop-store cannot be combined with --search or --contains."
+            )
+        candidate_ids: set[str] | None = None
+        candidate_order: dict[str, int] = {}
+
+        if semantic_mode:
+            if search_index is None:
+                raise click.ClickException(
+                    "Semantic search requires an existing Chromadb index. "
+                    "Run `dorgy search --init-store` or `dorgy org --with-search` to create one."
+                )
+            semantic_limit = effective_limit or len(state.files) or 0
+            if semantic_limit <= 0:
+                semantic_limit = len(state.files)
+            semantic_limit = min(len(state.files) or semantic_limit, semantic_limit)
+            try:
+                response = search_index.query(
+                    query,
+                    limit=semantic_limit or None,
+                    include_documents=True,
+                )
+            except SearchIndexError as exc:
+                raise click.ClickException(
+                    "Semantic search is unavailable because the collection's vector index "
+                    "is not initialised. Rebuild it with `dorgy search --init-store` or "
+                    "`dorgy org --with-search`. "
+                    f"Details: {exc}"
+                ) from exc
+            ids_matrix = response.get("ids", [[]])
+            distances_matrix = response.get("distances", [[]])
+            documents_matrix = (
+                response.get("documents", [[]]) if response.get("documents") else [[]]
+            )
+            ids = ids_matrix[0] if ids_matrix else []
+            distances = distances_matrix[0] if distances_matrix else []
+            documents = documents_matrix[0] if documents_matrix else []
+            candidate_ids = set()
+            for idx, doc_id in enumerate(ids):
+                record = records_by_document_id.get(doc_id)
+                if record is None:
+                    continue
+                candidate_order[doc_id] = len(candidate_order)
+                candidate_ids.add(doc_id)
+                distance = distances[idx] if idx < len(distances) else None
+                if isinstance(distance, (int, float)):
+                    score = 1.0 - float(distance)
+                    score_by_id[doc_id] = max(0.0, min(1.0, score))
+                    distance_by_id[doc_id] = float(distance)
+                else:
+                    score_by_id[doc_id] = None
+                    distance_by_id[doc_id] = None
+                if search_status and isinstance(search_status.get("space"), str):
+                    space_by_id[doc_id] = str(search_status["space"])
+                else:
+                    space_by_id[doc_id] = space_by_id.get(doc_id) or "cosine"
+                documents_value = documents[idx] if idx < len(documents) else ""
+                if documents_value:
+                    snippet_by_id[doc_id] = documents_value
+
+        if contains:
+            if search_index is None:
+                raise click.ClickException(
+                    "Substring filtering requires an existing Chromadb index. "
+                    "Run `dorgy search --init-store` or `dorgy org --with-search` to create one."
+                )
+            response = search_index.contains(
+                contains,
+                limit=effective_limit,
+                include_documents=True,
+            )
+            ids = response.get("ids", []) or []
+            documents = response.get("documents", []) or []
+            candidate_ids = set(ids)
+            for idx, doc_id in enumerate(ids):
+                snippet = documents[idx] if idx < len(documents) else ""
+                if snippet:
+                    snippet_by_id[doc_id] = snippet
+                distance_by_id.setdefault(doc_id, None)
+                score_by_id.setdefault(doc_id, None)
+                space_by_id.setdefault(doc_id, None)
+
         matches: list[tuple[str, FileRecord, datetime | None, Path]] = []
         fallback_timestamp = datetime.min.replace(tzinfo=timezone.utc)
 
         for rel_path, record in state.files.items():
             normalized_rel = _normalise_state_key(rel_path)
+            if candidate_ids is not None and record.document_id not in candidate_ids:
+                continue
             if name_pattern and not fnmatch.fnmatch(Path(normalized_rel).name, name_pattern):
                 continue
 
@@ -2060,7 +2535,7 @@ def search(
             if after_dt and (last_modified_utc is None or last_modified_utc < after_dt):
                 continue
 
-            if query_text:
+            if not semantic_mode and query_text:
                 haystack = [
                     normalized_rel.lower(),
                     " ".join(record_tags_lower),
@@ -2075,10 +2550,15 @@ def search(
             matches.append((normalized_rel, record, last_modified_utc, absolute_path))
 
         total_matches = len(matches)
-        matches.sort(
-            key=lambda entry: entry[2] if entry[2] is not None else fallback_timestamp,
-            reverse=True,
-        )
+        if semantic_mode and candidate_order:
+            matches.sort(
+                key=lambda entry: candidate_order.get(entry[1].document_id, len(candidate_order))
+            )
+        else:
+            matches.sort(
+                key=lambda entry: entry[2] if entry[2] is not None else fallback_timestamp,
+                reverse=True,
+            )
 
         displayed_matches = matches[:effective_limit] if effective_limit is not None else matches
         truncated = total_matches - len(displayed_matches)
@@ -2086,10 +2566,31 @@ def search(
             1 for _, record, _, _ in displayed_matches if record.needs_review
         )
 
+        if search_index is not None:
+            missing_doc_ids = [
+                record.document_id
+                for _, record, _, _ in displayed_matches
+                if record.document_id not in snippet_by_id
+            ]
+            if missing_doc_ids:
+                try:
+                    response = search_index.fetch(missing_doc_ids, include_documents=True)
+                    ids = response.get("ids", []) or []
+                    documents = response.get("documents", []) or []
+                    for idx, doc_id in enumerate(ids):
+                        if doc_id in snippet_by_id:
+                            continue
+                        snippet = documents[idx] if idx < len(documents) else ""
+                        if snippet:
+                            snippet_by_id[doc_id] = snippet
+                except SearchIndexError as exc:
+                    search_warnings.append(f"Unable to load document previews from Chromadb: {exc}")
+
         json_results = [
             {
                 "relative_path": rel_path,
                 "absolute_path": str(abs_path),
+                "document_id": record.document_id,
                 "tags": list(record.tags),
                 "categories": list(record.categories),
                 "needs_review": record.needs_review,
@@ -2097,6 +2598,11 @@ def search(
                 "last_modified": last_modified.isoformat() if last_modified else None,
                 "hash": record.hash,
                 "rename_suggestion": record.rename_suggestion,
+                "snippet": snippet_by_id.get(record.document_id),
+                "score": score_by_id.get(record.document_id),
+                "distance": distance_by_id.get(record.document_id),
+                "space": space_by_id.get(record.document_id),
+                "relevance": score_by_id.get(record.document_id),
             }
             for rel_path, record, last_modified, abs_path in displayed_matches
         ]
@@ -2105,6 +2611,7 @@ def search(
             "matches": len(displayed_matches),
             "total": total_matches,
             "needs_review": displayed_needs_review,
+            "search_enabled": bool(state.search.enabled),
         }
         if effective_limit is not None:
             counts["limit"] = effective_limit
@@ -2121,6 +2628,8 @@ def search(
             "after": after_dt.isoformat() if after_dt else None,
             "needs_review": needs_review,
             "limit": effective_limit,
+            "contains": contains,
+            "search_index": search_status,
         }
 
         json_payload = {
@@ -2128,28 +2637,56 @@ def search(
             "counts": counts,
             "results": json_results,
         }
+        if search_notes or search_warnings:
+            json_payload["notes"] = {
+                "info": search_notes,
+                "warnings": search_warnings,
+            }
 
         if json_enabled:
             console.print_json(data=json_payload)
             return
 
         if not summary_only:
+            for warning in search_warnings:
+                _emit_message(
+                    f"[yellow]{warning}[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+            for note in search_notes:
+                _emit_message(
+                    f"[cyan]{note}[/cyan]",
+                    mode="detail",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
             if displayed_matches:
-                table = Table(title=f"Search results for {root}")
+                table = Table(
+                    title=f"Search results for {root}",
+                    box=None,
+                    show_edge=False,
+                    show_lines=False,
+                    pad_edge=False,
+                    header_style="bold",
+                )
                 table.add_column("Path", overflow="fold")
-                table.add_column("Tags", overflow="fold")
-                table.add_column("Categories", overflow="fold")
-                table.add_column("Confidence", justify="right")
-                table.add_column("Needs Review", justify="center")
-                table.add_column("Modified")
-                for rel_path, record, last_modified, _ in displayed_matches:
+                table.add_column("Modified", overflow="fold")
+                for rel_path, _record, last_modified, _ in displayed_matches:
+                    parts = rel_path.split("/") if rel_path else []
+                    if parts:
+                        filename = parts[-1]
+                        prefix = "/".join(parts[:-1])
+                        if prefix:
+                            path_display = f"{prefix}/[bold]{filename}[/bold]"
+                        else:
+                            path_display = f"[bold]{filename}[/bold]"
+                    else:
+                        path_display = f"[bold]{rel_path}[/bold]"
                     table.add_row(
-                        rel_path,
-                        ", ".join(record.tags) or "-",
-                        ", ".join(record.categories) or "-",
-                        f"{record.confidence:.2f}" if record.confidence is not None else "-",
-                        "Yes" if record.needs_review else "No",
-                        last_modified.isoformat() if last_modified else "-",
+                        path_display,
+                        _format_modified_timestamp(last_modified),
                     )
                 _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)
             else:
@@ -2243,6 +2780,11 @@ def mv(
     MoveOperation = _load_dependency("MoveOperation", "dorgy.organization.models", "MoveOperation")
     StateRepository = _load_dependency("StateRepository", "dorgy.state", "StateRepository")
     MissingStateError = _load_dependency("MissingStateError", "dorgy.state", "MissingStateError")
+    SearchIndexError = _load_dependency("SearchIndexError", "dorgy.search", "SearchIndexError")
+    ensure_search_index = _load_dependency("ensure_index", "dorgy.search.lifecycle", "ensure_index")
+    refresh_search_metadata = _load_dependency(
+        "refresh_metadata", "dorgy.search.lifecycle", "refresh_metadata"
+    )
 
     json_enabled = json_output
     try:
@@ -2337,6 +2879,7 @@ def mv(
             "conflicts": 1 if conflict_applied else 0,
             "changes": 0,
         }
+        search_notes: list[str] = []
         changes: list[tuple[str, str]] = []
         events: list[OperationEvent] = []
 
@@ -2376,6 +2919,39 @@ def mv(
                     )
                     raise click.ClickException(failure_msg) from exc
                 _apply_state_changes(state, changes)
+                if state.search is None:
+                    from dorgy.state.models import SearchState
+
+                    state.search = SearchState()
+                if state.search.enabled:
+                    try:
+                        search_index = ensure_search_index(
+                            root,
+                            state,
+                            embedding_function=_load_embedding_function(
+                                config.search.embedding_function
+                            ),
+                        )
+                        records_to_refresh: list[tuple[Any, Mapping[str, Any] | None]] = []
+                        for _, new_key in changes:
+                            record = state.files.get(new_key)
+                            if record is None:
+                                continue
+                            records_to_refresh.append((record, {"source": "mv"}))
+                        refresh_search_metadata(search_index, state, records_to_refresh)
+                        if records_to_refresh and not json_output:
+                            _emit_message(
+                                (
+                                    "[cyan]Updated search metadata for "
+                                    f"{len(records_to_refresh)} file(s).[/cyan]"
+                                ),
+                                mode="detail",
+                                quiet=quiet_enabled,
+                                summary_only=summary_only,
+                            )
+                    except SearchIndexError as exc:
+                        state.search.enabled = False
+                        search_notes.append(f"Search indexing skipped: {exc}")
                 repository.save(root, state)
                 if events:
                     repository.append_history(root, events)
@@ -2398,8 +2974,10 @@ def mv(
             "plan": plan.model_dump(mode="json"),
             "changes": changes_payload,
         }
-        if plan.notes:
-            json_payload["notes"] = list(plan.notes)
+        combined_notes = list(plan.notes)
+        combined_notes.extend(search_notes)
+        if combined_notes:
+            json_payload["notes"] = combined_notes
         if events:
             json_payload["history"] = [event.model_dump(mode="json") for event in events]
         if not dry_run and not skipped_operation:
@@ -2437,14 +3015,14 @@ def mv(
                     summary_only=summary_only,
                 )
 
-            if plan.notes:
+            if combined_notes:
                 _emit_message(
                     "[yellow]Notes:[/yellow]",
                     mode="warning",
                     quiet=quiet_enabled,
                     summary_only=summary_only,
                 )
-                for entry in plan.notes:
+                for entry in combined_notes:
                     _emit_message(
                         f"  - {entry}",
                         mode="warning",

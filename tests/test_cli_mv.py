@@ -6,9 +6,14 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from dorgy.cli import cli
+from dorgy.search.index import DEFAULT_COLLECTION_NAME
+
+chromadb = pytest.importorskip("chromadb")
+Settings = pytest.importorskip("chromadb.config").Settings
 
 
 def _env_with_home(tmp_path: Path) -> dict[str, str]:
@@ -16,6 +21,7 @@ def _env_with_home(tmp_path: Path) -> dict[str, str]:
 
     env = dict(os.environ)
     env["HOME"] = str(tmp_path / "home")
+    env.setdefault("DORGY_USE_FALLBACKS", "1")
     return env
 
 
@@ -116,3 +122,36 @@ def test_cli_mv_conflict_skip(tmp_path: Path) -> None:
     assert payload["counts"]["skipped"] == 1
     assert current_path.exists()
     assert conflicting.exists()
+
+
+def test_cli_mv_updates_search_metadata(tmp_path: Path) -> None:
+    """Chromadb metadata should reflect new paths after moving files."""
+
+    root = tmp_path / "mv-search"
+    root.mkdir()
+    (root / "alpha.txt").write_text("alpha", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
+    assert org_result.exit_code == 0
+
+    state_data = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))
+    relative_path = next(iter(state_data["files"].keys()))
+    document_id = state_data["files"][relative_path]["document_id"]
+    source_path = (root / Path(relative_path)).resolve()
+    destination = (root / "archive" / source_path.name).resolve()
+
+    mv_result = runner.invoke(cli, ["mv", str(source_path), str(destination)], env=env)
+    assert mv_result.exit_code == 0
+
+    client = chromadb.PersistentClient(
+        path=str(root / ".dorgy" / "chroma"),
+        settings=Settings(anonymized_telemetry=False),
+    )
+    collection = client.get_collection(DEFAULT_COLLECTION_NAME)
+    record = collection.get(ids=[document_id])
+    assert record["ids"] == [document_id]
+    metadata = record["metadatas"][0]
+    assert metadata["path"].endswith(f"archive/{source_path.name}")

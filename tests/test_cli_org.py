@@ -26,6 +26,7 @@ def _env_with_home(tmp_path: Path) -> dict[str, str]:
     """
     env = dict(os.environ)
     env["HOME"] = str((tmp_path / "home"))
+    env.setdefault("DORGY_USE_FALLBACKS", "1")
     return env
 
 
@@ -567,3 +568,68 @@ def test_cli_status_respects_quiet_default(tmp_path: Path) -> None:
 
     assert status_result.exit_code == 0
     assert status_result.output.strip() == ""
+
+
+def test_cli_org_auto_builds_search_index(tmp_path: Path) -> None:
+    """`dorgy org` should create the Chromadb artifacts by default."""
+
+    root = tmp_path / "search"
+    root.mkdir()
+    (root / "alpha.txt").write_text("alpha", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["org", str(root)], env=env)
+
+    assert result.exit_code == 0
+    chroma_dir = root / ".dorgy" / "chroma"
+    manifest_path = root / ".dorgy" / "search.json"
+    assert chroma_dir.exists()
+    assert manifest_path.exists()
+    state_data = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))
+    assert state_data["search"]["enabled"] is True
+    assert state_data["search"]["last_indexed_at"] is not None
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["documents"] >= 1
+
+
+def test_cli_org_with_search_flag_still_builds_index(tmp_path: Path) -> None:
+    """Explicit `--with-search` should continue to build the index."""
+
+    root = tmp_path / "search-flag"
+    root.mkdir()
+    (root / "gamma.txt").write_text("gamma", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+
+    result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
+
+    assert result.exit_code == 0
+    chroma_dir = root / ".dorgy" / "chroma"
+    manifest_path = root / ".dorgy" / "search.json"
+    assert chroma_dir.exists()
+    assert manifest_path.exists()
+
+
+def test_cli_org_without_search_overrides_auto_enable(tmp_path: Path) -> None:
+    """`--without-search` should suppress indexing even when auto-enable is set."""
+
+    root = tmp_path / "search-disabled"
+    root.mkdir()
+    (root / "beta.txt").write_text("beta", encoding="utf-8")
+
+    runner = CliRunner()
+    env = _env_with_home(tmp_path)
+    config_path = Path(env["HOME"]) / ".dorgy" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("search:\n  auto_enable_org: true\n", encoding="utf-8")
+
+    result = runner.invoke(cli, ["org", str(root), "--without-search"], env=env)
+
+    assert result.exit_code == 0
+    chroma_dir = root / ".dorgy" / "chroma"
+    assert not chroma_dir.exists()
+    state_data = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))
+    assert state_data["search"]["enabled"] is False

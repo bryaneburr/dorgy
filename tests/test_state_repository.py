@@ -64,6 +64,44 @@ def test_save_and_load_round_trip(tmp_path: Path) -> None:
     assert loaded.root == state.root
     assert loaded.files.keys() == state.files.keys()
     assert loaded.updated_at >= loaded.created_at
+    for record in loaded.files.values():
+        assert record.document_id
+    assert loaded.search.enabled is False
+
+
+def test_load_backfills_document_ids_and_search_state(tmp_path: Path) -> None:
+    """Loading a legacy state should normalize IDs and search metadata."""
+
+    repo = StateRepository()
+    directory = repo.initialize(tmp_path)
+    payload = {
+        "root": str(tmp_path),
+        "files": {
+            "docs/readme.md": {
+                "path": "docs/readme.md",
+                "tags": [],
+                "categories": [],
+                "last_modified": "2024-01-01T12:00:00",
+            }
+        },
+        "created_at": "2024-01-01T00:00:00",
+        "updated_at": "2024-01-01T01:00:00",
+    }
+    (directory / "state.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    state = repo.load(tmp_path)
+
+    record = state.files["docs/readme.md"]
+    assert record.document_id
+    assert record.last_modified and record.last_modified.tzinfo is not None
+    assert state.created_at.tzinfo is not None
+    assert state.updated_at.tzinfo is not None
+    assert state.search.enabled is False
+    assert state.search.version == 1
+
+    written = json.loads((directory / "state.json").read_text(encoding="utf-8"))
+    assert "search" in written
+    assert written["files"]["docs/readme.md"]["document_id"] == record.document_id
 
 
 def test_load_missing_state_raises(tmp_path: Path) -> None:

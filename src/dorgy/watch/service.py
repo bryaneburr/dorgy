@@ -50,11 +50,22 @@ from dorgy.ingestion.models import IngestionResult
 from dorgy.organization.executor import OperationExecutor
 from dorgy.organization.models import DeleteOperation, OperationPlan
 from dorgy.organization.planner import OrganizerPlanner
+from dorgy.search import (
+    SearchEntry,
+    SearchIndex,
+    SearchIndexError,
+    delete_entries,
+    descriptor_document_text,
+    ensure_index,
+    update_entries,
+)
 from dorgy.shutdown import ShutdownRequested, check_for_shutdown, shutdown_requested
 from dorgy.state import (
     CollectionState,
+    FileRecord,
     MissingStateError,
     OperationEvent,
+    SearchState,
     StateError,
     StateRepository,
 )
@@ -158,6 +169,9 @@ class WatchService:
         recursive: bool,
         debounce_override: Optional[float] = None,
         allow_deletions: bool = False,
+        with_search: bool = False,
+        without_search: bool = False,
+        embedding_function: Any | None = None,
     ) -> None:
         """Initialize the watch service.
 
@@ -172,8 +186,13 @@ class WatchService:
             debounce_override: Optional debounce interval override in seconds.
             allow_deletions: Whether to remove records when files are deleted or
                 moved outside monitored roots.
+            with_search: Force-enable search indexing for batches.
+            without_search: Force-disable search indexing for batches.
+            embedding_function: Optional Chromadb embedding function override.
         """
 
+        if with_search and without_search:
+            raise ValueError("--with-search cannot be combined with --without-search.")
         self._config = config
         self._classification_prompt = classification_prompt
         self._structure_prompt = structure_prompt or classification_prompt
@@ -208,6 +227,11 @@ class WatchService:
         self._backoff: dict[Path, float] = defaultdict(lambda: self._initial_backoff)
         self._copy_mode = False
         self._allow_deletions = allow_deletions
+        self._search_override: bool | None = (
+            True if with_search else False if without_search else None
+        )
+        self._search_embedding_function = embedding_function
+        self._search_indices: dict[Path, SearchIndex] = {}
         if self._output is not None:
             if len(self._roots) != 1:
                 raise ValueError("--output requires a single source root.")
@@ -467,6 +491,8 @@ class WatchService:
         plan = OperationPlan()
         final_path_map: dict[Path, Path] = {}
         file_entries: list[dict[str, Any]] = []
+        search_entries: list[SearchEntry] = []
+        search_notes: list[str] = []
         vision_warning: str | None = None
 
         if ingestion_inputs:
@@ -615,6 +641,8 @@ class WatchService:
         triggered_paths = sorted(triggered_paths_set)
         batch_id = self._next_batch_id()
         notes = list(plan.notes)
+        if search_notes:
+            notes.extend(search_notes)
 
         executed_requests: list[RemovalRequest] = []
         suppressed_requests: list[tuple[RemovalRequest, str]] = []
@@ -770,6 +798,30 @@ class WatchService:
             state = self._repository.load(target_root)
         except MissingStateError:
             state = CollectionState(root=str(target_root))
+        if state.search is None:
+            state.search = SearchState()
+        search_index: SearchIndex | None = None
+        search_enabled = self._should_enable_search(state)
+        state.search.enabled = search_enabled
+        if not search_enabled:
+            state.search.last_indexed_at = None
+        if search_enabled:
+            try:
+                search_index = self._search_indices.get(target_root)
+                if search_index is None:
+                    search_index = ensure_index(
+                        target_root,
+                        state,
+                        embedding_function=self._search_embedding_function,
+                    )
+                    self._search_indices[target_root] = search_index
+                else:
+                    search_index.initialize()
+                    state.search.enabled = True
+            except SearchIndexError as exc:
+                search_index = None
+                state.search.enabled = False
+                search_notes.append(f"Search indexing skipped: {exc}")
 
         snapshot = build_original_snapshot([descriptor for _, descriptor in paired], source_root)
         try:
@@ -812,14 +864,50 @@ class WatchService:
 
             record = descriptor_to_record(descriptor, decision, target_root)
 
-            state.files.pop(old_relative, None)
+            previous_record = state.files.pop(old_relative, None)
+            if previous_record is not None:
+                record.document_id = previous_record.document_id
             state.files[record.path] = record
 
+        if search_index is not None:
+            for _, descriptor in paired:
+                document_text = descriptor_document_text(descriptor)
+                if not document_text:
+                    continue
+                relative = relative_to_collection(descriptor.path, target_root)
+                existing_record = state.files.get(relative)
+                if existing_record is None:
+                    continue
+                entry = SearchEntry.from_record(
+                    existing_record,
+                    document_text,
+                    extra_metadata={"mime_type": descriptor.mime_type, "source": "watch"},
+                )
+                search_entries.append(entry)
+            if search_entries:
+                try:
+                    update_entries(search_index, state, search_entries)
+                except SearchIndexError as exc:
+                    search_notes.append(f"Search indexing skipped: {exc}")
+                    state.search.enabled = False
+
         removed_relatives: list[str] = []
+        removed_doc_ids: list[str] = []
         for request in executed_requests:
             relative = relative_to_collection(request.path, target_root)
-            if state.files.pop(relative, None) is not None:
+            removed_record: FileRecord | None = None
+            if relative in state.files:
+                removed_record = state.files.pop(relative)
+            if removed_record is not None:
                 removed_relatives.append(relative)
+                removed_doc_ids.append(removed_record.document_id)
+
+        if search_index is not None and removed_doc_ids:
+            try:
+                delete_entries(search_index, state, list(dict.fromkeys(removed_doc_ids)))
+            except SearchIndexError as exc:
+                search_notes.append(f"Search indexing skipped: {exc}")
+                state.search.enabled = False
 
         delete_events: list[OperationEvent] = []
         for request in executed_requests:
@@ -945,6 +1033,17 @@ class WatchService:
                 log_file.write(error_line)
         except OSError:
             pass
+
+    def _should_enable_search(self, state: CollectionState) -> bool:
+        """Return whether search indexing should run for the batch."""
+
+        if self._search_override is True:
+            return True
+        if self._search_override is False:
+            return False
+        if state.search.enabled:
+            return True
+        return self._config.search.auto_enable_watch
 
     def _should_ignore_path(self, path: Path) -> bool:
         """Return whether ``path`` should be ignored for watch processing."""

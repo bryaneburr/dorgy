@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Dict, List, Literal, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+
+def _generate_document_id() -> str:
+    """Return a new hex-encoded document identifier."""
+
+    return uuid4().hex
 
 
 class FileRecord(BaseModel):
@@ -13,6 +20,7 @@ class FileRecord(BaseModel):
 
     Attributes:
         path: Relative path to the file within the collection root.
+        document_id: Stable identifier used for search/index references.
         hash: Optional hash representing the file contents.
         tags: Tags inferred during ingestion.
         categories: Explicit categories associated with the file.
@@ -28,6 +36,7 @@ class FileRecord(BaseModel):
     """
 
     path: str
+    document_id: str = Field(default_factory=_generate_document_id)
     hash: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     categories: List[str] = Field(default_factory=list)
@@ -64,6 +73,20 @@ class OperationEvent(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 
+class SearchState(BaseModel):
+    """Metadata describing per-collection search/index status.
+
+    Attributes:
+        enabled: Whether the collection maintains a local search index.
+        version: Schema/version identifier for the search store.
+        last_indexed_at: Timestamp for the most recent indexing pass.
+    """
+
+    enabled: bool = False
+    version: int = 1
+    last_indexed_at: Optional[datetime] = None
+
+
 class CollectionState(BaseModel):
     """Aggregate metadata for an organized directory.
 
@@ -72,12 +95,14 @@ class CollectionState(BaseModel):
         files: Mapping of relative paths to file records.
         created_at: Timestamp capturing when the collection was first tracked.
         updated_at: Timestamp capturing the latest mutation time.
+        search: Search-index metadata used by CLI workflows.
     """
 
     root: str
     files: Dict[str, FileRecord] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    search: SearchState = Field(default_factory=SearchState)
 
 
-__all__ = ["FileRecord", "CollectionState", "OperationEvent"]
+__all__ = ["FileRecord", "CollectionState", "OperationEvent", "SearchState"]

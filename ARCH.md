@@ -22,11 +22,11 @@
 3. **Classification** &mdash; `ClassificationEngine` evaluates descriptors. When DSPy/models are available it invokes structured programs; otherwise it falls back to heuristics. Results are cached via `ClassificationCache`, and image captions use `VisionCache`. Prompt overrides travel through CLI options or prompt files and flow into the structure planner so folder proposals respect the same guidance. Needs-review routing compares the returned confidence against `ambiguity.confidence_threshold` (default 0.60) so automation can triage low-certainty decisions.
 4. **Structure planning** &mdash; `StructurePlanner` suggests destination folders, while `OrganizerPlanner` turns classifications into `OperationPlan` instances containing renames, moves, metadata updates, and planner notes. Conflict strategies (`append_number`, `timestamp`, `skip`) are honored per config.
 5. **Execution** &mdash; `OperationExecutor` stages files into `.dorgy/staging`, applies renames/moves (copy mode supported), emits `OperationEvent`s, and rolls back on failure. Delete operations generated during watch runs are gated by `processing.watch.allow_deletions`/`--allow-deletions`.
-6. **State persistence & outputs** &mdash; `StateRepository` updates `state.json`, appends to `history.jsonl`, refreshes needs-review/quarantine directories, and stores original snapshots for undo. CLI helpers format rich tables, progress, summary lines, and standardized JSON payloads (`collect_error_payload`, `_handle_cli_error`, `_emit_watch_batch`, etc.).
+6. **State persistence & outputs** &mdash; `StateRepository` updates `state.json`, appends to `history.jsonl`, refreshes needs-review/quarantine directories, and stores original snapshots for undo. CLI helpers format rich tables, progress, summary lines, and standardized JSON payloads (`collect_error_payload`, `_handle_cli_error`, `_emit_watch_batch`, etc.). When search is enabled, `dorgy org` feeds descriptor previews/captions through `SearchIndex`, writes `.dorgy/chroma`/`search.json`, and stamps `state.search` metadata with enablement/version/timestamps so downstream commands can detect the index.
 
 ### State-Oriented Commands
 
-`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. Searches apply filters across tags/categories/timestamps, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads.
+`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. `search` requires an active Chromadb index; the CLI errors if a collection has not been initialized via `dorgy org --with-search` or `dorgy search --init-store`. When enabled, search layers Chromadb substring lookups (`where_document{"$contains": ...}`) and semantic queries (`collection.query`) on top of tag/category/date filters, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads.
 
 ## Module Responsibilities
 
@@ -52,17 +52,21 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### State & History (`src/dorgy/state/`)
 
-`StateRepository` encapsulates persistence inside `.dorgy/`, storing `CollectionState` (per-file metadata, tags, categories, confidence, needs-review flags), original structure snapshots (`orig.json`), history logs (`history.jsonl`), and rolling notes/needs-review/quarantine subdirectories. Errors raise `StateError`/`MissingStateError`. State is the backbone for search, status, move, and undo commands and for watch batch summaries.
+`StateRepository` encapsulates persistence inside `.dorgy/`, storing `CollectionState` (per-file metadata, stable `document_id`s for Chromadb, tags, categories, confidence, needs-review flags, and search metadata), original structure snapshots (`orig.json`), history logs (`history.jsonl`), `.dorgy/search.json` manifests, and rolling notes/needs-review/quarantine subdirectories. Legacy payloads are migrated in-place so timestamps become timezone-aware and missing IDs are backfilled. Errors raise `StateError`/`MissingStateError`. State is the backbone for search, status, move, and undo commands and for watch batch summaries.
 
 ### Watch Service (`src/dorgy/watch/service.py`)
 
-`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, CLI output helpers, and the shared shutdown event so Ctrl+C stops observers and queued work promptly.
+`WatchService` monitors directories via `watchdog` observers (optional dependency). It normalizes filesystem events, debounces bursts, and batches descriptors before handing them to the same ingestion/classification/organization pipeline. Batch results are returned as `WatchBatchResult` objects with counts, errors, planner notes, JSON payloads, and suppressed deletions (when `processing.watch.allow_deletions` is false or `--allow-deletions` is omitted). Watch runs honour copy mode, dry-run, prompt overrides, CLI output helpers, the shared shutdown event, and (when enabled) reuse the search lifecycle helpers to upsert/delete Chromadb records after each batch.
 
 ### CLI Support & Shared Utilities
 
 - `cli_support.py` &mdash; classification caching keys, descriptor-to-state conversions, summary builders, error payload assembly, and helper functions (`build_original_snapshot`, `descriptor_to_record`, `relative_to_collection`).
 - `cli_options.py` &mdash; consolidated Click option decorators so commands stay aligned with global UX.
 - `classification/vision.py` &mdash; integrates image captioning, caching captions in `.dorgy/vision.json` and respecting prompts forwarded from the CLI.
+
+### Search Indexing (`src/dorgy/search/`)
+
+`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `initialize`, `upsert`, `update_metadata`, `contains`, `query`, `fetch`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules (`normalize_search_text`, `descriptor_document_text`). `lifecycle.py` adds `ensure_index`/`update_entries`/`delete_entries`/`refresh_metadata`/`drop_index` helpers used by CLI flows so `.dorgy/chroma` stays authoritative as org/watch/mv/search pipelines mutate state. Metadata-only operations (e.g., `dorgy mv`) reuse the refresh helper to avoid re-embedding when paths change, and the `dorgy search` command rebuilds or tears down stores via these helpers before issuing substring or semantic queries. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
 
 ## Data & Caching Layout
 
@@ -73,6 +77,8 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 - `.dorgy/classifications.json` &mdash; persisted decision cache, enabling incremental runs.
 - `.dorgy/vision.json` &mdash; cached image captions to avoid redundant model calls.
 - `.dorgy/needs-review/` and `.dorgy/quarantine/` &mdash; holding areas for files that need manual attention or were isolated by the pipeline.
+- `.dorgy/chroma/` &mdash; per-collection Chromadb store managed by `dorgy.search.index.SearchIndex`.
+- `.dorgy/search.json` &mdash; manifest describing search enablement, schema version, and document counts for CLI health checks.
 
 ## Automation & Tooling Surface
 

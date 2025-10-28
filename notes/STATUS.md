@@ -176,3 +176,22 @@
 - Next actions: run `uv run pytest tests/test_structure_planner.py` and `uv run pre-commit run --files src/dorgy/classification/structure.py tests/test_structure_planner.py` before opening the PR.
 - Introduced `--classify-prompt`/`--structure-prompt` (plus file variants) on `org`/`watch`, split prompt plumbing across classification and structure planning, refreshed docs/tests, and kept JSON compatibility via legacy `context.prompt`.
 - Next actions: execute `uv run pre-commit run --files src/dorgy/cli.py src/dorgy/cli_support.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
+
+## 2025-11-06
+- Began Phase 7 implementation by extending `FileRecord` with persistent `document_id`s, adding `CollectionState.search` metadata, and teaching `StateRepository` to normalize timestamps/IDs plus persist `.dorgy/search.json`; backfilled IDs are saved automatically during load migrations.
+- Added a dedicated `search` config block (`default_limit`, `auto_enable_org`, `auto_enable_watch`, `embedding_function`) while keeping legacy `cli.search_default_limit` as a fallback; the CLI now prefers the new default limit.
+- Scaffolded the `dorgy.search` package with `SearchIndex`, `SearchEntry`, and `normalize_search_text`, including Chromadb client injection hooks, manifest management, and unit tests covering upsert/delete/drop/status behavior.
+- Updated README/ARCH/SPEC/root+module AGENTS to describe the Chromadb plan, `.dorgy/chroma` layout, and new coordination requirements; logged the plan in `notes/chromadb_search_plan.md` and added a session summary here.
+- Next actions: wire `SearchIndex` into `org`/`watch`/`mv`/`search`, add CLI flags for search lifecycle management (`--with-search`, `--init-store`, `--drop-store`, `--contains`), and extend tests/docs accordingly.
+- Added search lifecycle helpers (`ensure_index`, `update_entries`, `descriptor_document_text`) plus `dorgy org --with-search/--without-search` so Chromadb indexes are created immediately after organization. Search metadata now persists in state, manifests are initialized even with zero docs, and CLI/tests cover both enabling/disabling flows.
+- Updated README/ARCH/SPEC/AGENTS with the new CLI flags and config expectations, expanded `tests/test_cli_org.py` and `tests/test_search_index.py`, and documented progress in the Chromadb plan.
+- Next actions: propagate the lifecycle helpers to watch/mv/search commands (including `--init-store`/`--drop-store`/`--contains` UX), plumb descriptor text into watch batches, and expose search results/JSON payloads sourced directly from Chromadb.
+- Extended the search lifecycle into `dorgy watch`: added `--with-search`/`--without-search`, honored `search.auto_enable_watch`, and taught `WatchService` to upsert previews/captions plus delete Chromadb entries when batches remove files. CLI/tests now assert `.dorgy/chroma` manifests for watch runs, and docstrings/AGENTS/README/SPEC all reflect the new behaviour.
+- Next actions: wire `dorgy mv` and the `dorgy search` command into the Chromadb lifecycle (init/drop/reindex, contains queries), then surface Chromadb scores/document IDs in CLI outputs.
+- `dorgy mv` now refreshes Chromadb metadata for moved files (when search is enabled) using the new lifecycle helpers; CLI/JSON payloads surface search warnings, and unit tests assert that Chromadb metadata reflects the new archive paths.
+
+## 2025-11-07
+- Wired the `dorgy search` command into Chromadb: substring queries now call `SearchIndex.contains`, `--init-store` rebuilds `.dorgy/chroma` via the ingestion pipeline, semantic lookups use `SearchIndex.query`, and `--drop-store` disables indexing while surfacing collection metadata in notes.
+- Added query helpers (`SearchIndex.contains`/`query`/`fetch`), removed the duplicate metadata builder, refreshed `tests/test_cli_search.py`, and updated README/ARCH/SPEC/search AGENTS plus the Chromadb plan/status notes to cover the stricter “index required” behaviour.
+- Disabled Chromadb telemetry by default via `CHROMADB_TELEMETRY_ENABLED=0`, keeping collections local unless operators explicitly opt in.
+- Next actions: run `uv run pytest` and `uv run pre-commit run --all-files` before merging, then look at a potential `--reindex` helper and future embedding/telemetry surfacing follow-ups.
