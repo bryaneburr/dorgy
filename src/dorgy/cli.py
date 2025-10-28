@@ -2587,6 +2587,7 @@ def search(
                 "score": score_by_id.get(record.document_id),
                 "distance": distance_by_id.get(record.document_id),
                 "space": space_by_id.get(record.document_id),
+                "relevance": score_by_id.get(record.document_id),
             }
             for rel_path, record, last_modified, abs_path in displayed_matches
         ]
@@ -2653,11 +2654,9 @@ def search(
                 table.add_column("Categories", overflow="fold")
                 table.add_column("Confidence", justify="right")
                 table.add_column("Needs Review", justify="center")
-                table.add_column("Modified")
+                table.add_column("Modified", min_width=24)
                 table.add_column("Document ID", overflow="fold")
-                table.add_column("Score", justify="right")
-                table.add_column("Distance", justify="right")
-                table.add_column("Space", overflow="fold")
+                table.add_column("Relevance", justify="right")
                 table.add_column("Snippet", overflow="fold")
                 for rel_path, record, last_modified, _ in displayed_matches:
                     snippet = snippet_by_id.get(record.document_id)
@@ -2666,18 +2665,11 @@ def search(
                     else:
                         snippet_display = snippet or "-"
                     score_value = score_by_id.get(record.document_id)
-                    score_text = (
-                        f"{float(score_value):.4f}"
+                    relevance_text = (
+                        f"{float(score_value):.2%}"
                         if isinstance(score_value, (int, float))
                         else "-"
                     )
-                    distance_value = distance_by_id.get(record.document_id)
-                    distance_text = (
-                        f"{float(distance_value):.4f}"
-                        if isinstance(distance_value, (int, float))
-                        else "-"
-                    )
-                    space_text = space_by_id.get(record.document_id) or "-"
                     table.add_row(
                         rel_path,
                         ", ".join(record.tags) or "-",
@@ -2686,9 +2678,7 @@ def search(
                         "Yes" if record.needs_review else "No",
                         last_modified.isoformat() if last_modified else "-",
                         record.document_id,
-                        score_text,
-                        distance_text,
-                        space_text,
+                        relevance_text,
                         snippet_display,
                     )
                 _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)

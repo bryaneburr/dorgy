@@ -50,6 +50,7 @@ def test_cli_search_json_results(tmp_path: Path) -> None:
         assert entry["score"] is None
         assert entry["distance"] is None
         assert entry["space"] is None
+        assert entry["relevance"] is None
         assert entry["snippet"] is None or isinstance(entry["snippet"], str)
 
 
@@ -78,6 +79,7 @@ def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
     assert entry["relative_path"].endswith("alpha.txt")
     assert entry["distance"] is None
     assert entry["space"] is None
+    assert entry["relevance"] is None
 
     limited_result = runner.invoke(
         cli,
@@ -155,6 +157,7 @@ def test_cli_search_contains_after_org(tmp_path: Path) -> None:
     assert entry["snippet"]
     assert entry["distance"] is None
     assert entry["space"] is None
+    assert entry["relevance"] is None
 
 
 def test_cli_search_init_store_builds_index(tmp_path: Path) -> None:
@@ -235,6 +238,7 @@ def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
     entry = payload["results"][0]
     assert entry["distance"] is None
     assert entry["space"] is None
+    assert entry["relevance"] is None
 
     semantic_result = runner.invoke(
         cli,
@@ -248,6 +252,7 @@ def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
     assert first["score"] is not None
     assert first["distance"] is not None
     assert first["space"] == "cosine"
+    assert first["relevance"] is not None
 
 
 def test_cli_search_semantic_requires_index(tmp_path: Path) -> None:
@@ -298,3 +303,4 @@ def test_cli_search_semantic_results(tmp_path: Path) -> None:
     assert first["distance"] is not None
     assert first["space"] == "cosine"
     assert first["snippet"]
+    assert first["relevance"] is not None
