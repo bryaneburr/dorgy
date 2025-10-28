@@ -87,7 +87,7 @@ All commands accept `--json` for machine-readable output and share standardized 
 
 ### Search Workflow
 
-Chromadb indexes live beside collection state under `<collection>/.dorgy/chroma` with a manifest at `<collection>/.dorgy/search.json`. Collections without an index will fail fast with guidance to run `dorgy search --init-store` or `dorgy org --with-search` before searching. Enable indexing during organization or watch runs with `--with-search` (or via `search.auto_enable_org` / `search.auto_enable_watch` in the config), then query results with:
+Chromadb indexes live beside collection state under `<collection>/.dorgy/chroma` with a manifest at `<collection>/.dorgy/search.json`. Dorgy now builds search indexes automatically during `dorgy org` and watch batches; pass `--without-search` if you need to skip indexing for a run. Query results with:
 
 - `dorgy search <path> --contains "phrase"` – performs substring filtering against stored document text while still honouring tag/category/date filters.
 - `dorgy search <path> --search "phrase"` – issues a semantic similarity lookup via Chromadb embeddings (requires the local index to be initialised).
@@ -105,7 +105,7 @@ Both human-readable and JSON modes surface persistent `document_id`s, optional s
 - `processing` governs ingestion behaviour (batch sizes, captioning, concurrency, size limits). `processing.process_images` is enabled by default to capture multimodal captions stored in `.dorgy/vision.json`.
 - `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation. Automatic renaming is disabled by default (`organization.rename_files: false`) so classification runs remain non-destructive unless you opt in.
 - `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (legacy configs may still surface `cli.search_default_limit`, but new installs should use the `search` block instead).
-- `search` governs Chromadb-backed indexing (default result limits, whether `org`/`watch` auto-maintain the store, and optional embedding function overrides). Stores live beside `state.json` under `<collection>/.dorgy/chroma`; use `dorgy org|watch --with-search` / `--without-search` to override enablement per run, `dorgy search --init-store` to rebuild indexes, and `dorgy search --drop-store` to remove them safely.
+- `search` governs Chromadb-backed indexing (default result limits, whether `org`/`watch` auto-maintain the store, and optional embedding function overrides). Stores live beside `state.json` under `<collection>/.dorgy/chroma`; indexing is enabled by default, but you can pass `--without-search` (or set config values) to skip runs, use `dorgy search --init-store` to rebuild indexes, and `dorgy search --drop-store` to remove them safely.
 - Chromadb telemetry is disabled by default (`CHROMADB_TELEMETRY_ENABLED=0`) so collections stay local. Set the variable to `1` if you intentionally want to opt into telemetry.
 - Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
 - LLM models are configured through the `llm` block. The default target is `openai/gpt-5`; provide any LiteLLM-compatible identifier (for example `openai/gpt-4o-mini` or `openrouter/gpt-4o-mini:free`) via `llm.model`, supply `llm.api_key`/`llm.api_base_url` when required, and set `DORGY_USE_FALLBACKS=1` only when explicitly exercising heuristic classifiers in development.

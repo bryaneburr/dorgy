@@ -1,6 +1,6 @@
 # Phase 7 Search Progress Snapshot
 
-- Org, watch, and mv flows continue to reuse the Chromadb lifecycle helpers. Search indexes are created on demand, manifests stay in sync, and metadata-only operations refresh existing entries without touching embeddings.
+- Org, watch, and mv flows continue to reuse the Chromadb lifecycle helpers. Search indexes are now created automatically (unless `--without-search` is provided), manifests stay in sync, and metadata-only operations refresh existing entries without touching embeddings.
 - `dorgy search` now exercises the full lifecycle: `--contains` issues Chromadb substring queries, `--init-store` rebuilds indexes from existing files (using ingestion+vision helpers), `--reindex` drops and fully rebuilds indexes in-place, `--drop-store` disables indexing cleanly, and both table/JSON outputs include `document_id`, `score`, and snippet fields. The command fails fast when search is disabled, guiding operators to initialize or re-enable the index before querying.
 - Tests cover search-aware behaviours across org/watch/mv plus the new search flows (`tests/test_cli_org.py`, `tests/test_cli_watch.py`, `tests/test_cli_mv.py`, `tests/test_cli_search.py`, `tests/test_search_index.py`).
 - Documentation, AGENTS notes, SPEC Phase 7, and the Chromadb plan have been refreshed with the latest CLI behaviour and lifecycle details.

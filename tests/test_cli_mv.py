@@ -133,7 +133,7 @@ def test_cli_mv_updates_search_metadata(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
     assert org_result.exit_code == 0
 
     state_data = json.loads((root / ".dorgy" / "state.json").read_text(encoding="utf-8"))

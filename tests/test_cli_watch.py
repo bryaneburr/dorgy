@@ -122,8 +122,8 @@ def test_cli_watch_prompt_file_overrides_inline_prompt(tmp_path: Path) -> None:
     assert context["prompt"] == prompt_content
 
 
-def test_cli_watch_once_with_search(tmp_path: Path) -> None:
-    """`--with-search` should create the Chromadb artifacts for watch batches."""
+def test_cli_watch_once_builds_search_by_default(tmp_path: Path) -> None:
+    """Watch batches should auto-build the Chromadb artifacts by default."""
 
     root = tmp_path / "search"
     root.mkdir()
@@ -134,7 +134,7 @@ def test_cli_watch_once_with_search(tmp_path: Path) -> None:
 
     result = runner.invoke(
         cli,
-        ["watch", str(root), "--once", "--with-search"],
+        ["watch", str(root), "--once"],
         env=env,
     )
 

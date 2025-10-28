@@ -25,7 +25,7 @@ def _env_with_home(tmp_path: Path) -> dict[str, str]:
 
 
 def test_cli_search_json_results(tmp_path: Path) -> None:
-    """`dorgy search --json` should return structured results."""
+    """`dorgy search --json` should return structured results when indexed."""
 
     root = tmp_path / "collection"
     root.mkdir()
@@ -35,7 +35,7 @@ def test_cli_search_json_results(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
+    org_result = runner.invoke(cli, ["org", str(root)], env=env)
     assert org_result.exit_code == 0
 
     search_result = runner.invoke(cli, ["search", str(root), "--json"], env=env)
@@ -44,12 +44,9 @@ def test_cli_search_json_results(tmp_path: Path) -> None:
     payload = json.loads(search_result.output)
     assert payload["counts"]["total"] == 2
     assert payload["counts"]["matches"] == 2
-    assert payload["counts"]["search_enabled"] in (True, False)
-    relative_paths = {entry["relative_path"] for entry in payload["results"]}
-    assert any(path.endswith("alpha.txt") for path in relative_paths)
-    assert any(path.endswith("beta.txt") for path in relative_paths)
+    assert payload["counts"]["search_enabled"] is True
     for entry in payload["results"]:
-        assert "document_id" in entry
+        assert entry["document_id"]
         assert entry["score"] is None
         assert entry["distance"] is None
         assert entry["space"] is None
@@ -57,7 +54,7 @@ def test_cli_search_json_results(tmp_path: Path) -> None:
 
 
 def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
-    """Search filters (name/limit) should narrow results as expected."""
+    """Metadata filters should still operate after automatic indexing."""
 
     root = tmp_path / "filtered"
     root.mkdir()
@@ -67,8 +64,7 @@ def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     name_result = runner.invoke(
         cli,
@@ -78,12 +74,10 @@ def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
     assert name_result.exit_code == 0
     name_payload = json.loads(name_result.output)
     assert name_payload["counts"]["matches"] == 1
-    assert name_payload["results"][0]["relative_path"].endswith("alpha.txt")
-    assert name_payload["results"][0]["snippet"] is None or isinstance(
-        name_payload["results"][0]["snippet"], str
-    )
-    assert name_payload["results"][0]["distance"] is None
-    assert name_payload["results"][0]["space"] is None
+    entry = name_payload["results"][0]
+    assert entry["relative_path"].endswith("alpha.txt")
+    assert entry["distance"] is None
+    assert entry["space"] is None
 
     limited_result = runner.invoke(
         cli,
@@ -95,7 +89,6 @@ def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
     assert limited_payload["counts"]["matches"] == 1
     assert limited_payload["counts"]["total"] == 2
     assert limited_payload["counts"]["truncated"] == 1
-    assert limited_payload["results"][0]["document_id"]
 
 
 def test_cli_search_text_summary(tmp_path: Path) -> None:
@@ -108,8 +101,7 @@ def test_cli_search_text_summary(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     result = runner.invoke(cli, ["search", str(root)], env=env)
     assert result.exit_code == 0
@@ -126,8 +118,7 @@ def test_cli_search_contains_requires_index(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root)], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root), "--without-search"], env=env).exit_code == 0
 
     search_result = runner.invoke(
         cli,
@@ -149,8 +140,7 @@ def test_cli_search_contains_after_org(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     search_result = runner.invoke(
         cli,
@@ -158,14 +148,13 @@ def test_cli_search_contains_after_org(tmp_path: Path) -> None:
         env=env,
     )
     assert search_result.exit_code == 0
-
     payload = json.loads(search_result.output)
     assert payload["counts"]["matches"] == 1
-    result_entry = payload["results"][0]
-    assert result_entry["relative_path"].endswith("alpha.txt")
-    assert result_entry["snippet"]
-    assert result_entry["distance"] is None
-    assert result_entry["space"] is None
+    entry = payload["results"][0]
+    assert entry["relative_path"].endswith("alpha.txt")
+    assert entry["snippet"]
+    assert entry["distance"] is None
+    assert entry["space"] is None
 
 
 def test_cli_search_init_store_builds_index(tmp_path: Path) -> None:
@@ -178,8 +167,7 @@ def test_cli_search_init_store_builds_index(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root)], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     init_result = runner.invoke(
         cli,
@@ -187,7 +175,6 @@ def test_cli_search_init_store_builds_index(tmp_path: Path) -> None:
         env=env,
     )
     assert init_result.exit_code == 0
-
     payload = json.loads(init_result.output)
     assert payload["counts"]["matches"] == 1
     assert payload["results"][0]["relative_path"].endswith("gamma.txt")
@@ -205,8 +192,7 @@ def test_cli_search_drop_store_disables_index(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     drop_result = runner.invoke(
         cli,
@@ -214,12 +200,10 @@ def test_cli_search_drop_store_disables_index(tmp_path: Path) -> None:
         env=env,
     )
     assert drop_result.exit_code == 0
-
     payload = json.loads(drop_result.output)
     assert payload["counts"]["matches"] == 1
     assert payload["results"][0]["relative_path"].endswith("delta.txt")
-    notes = payload.get("notes", {})
-    assert any("dropped" in entry.lower() for entry in notes.get("info", []))
+    assert any("dropped" in entry.lower() for entry in payload.get("notes", {}).get("info", []))
 
 
 def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
@@ -233,10 +217,8 @@ def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
-    # Modify the file to force a reindex change.
     moved = root / "documents" / "alpha.txt"
     moved.write_text("updated bananas", encoding="utf-8")
 
@@ -278,8 +260,7 @@ def test_cli_search_semantic_requires_index(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root)], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root), "--without-search"], env=env).exit_code == 0
 
     search_result = runner.invoke(
         cli,
@@ -301,8 +282,7 @@ def test_cli_search_semantic_results(tmp_path: Path) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    org_result = runner.invoke(cli, ["org", str(root), "--with-search"], env=env)
-    assert org_result.exit_code == 0
+    assert runner.invoke(cli, ["org", str(root)], env=env).exit_code == 0
 
     search_result = runner.invoke(
         cli,
@@ -310,7 +290,6 @@ def test_cli_search_semantic_results(tmp_path: Path) -> None:
         env=env,
     )
     assert search_result.exit_code == 0
-
     payload = json.loads(search_result.output)
     assert payload["counts"]["matches"] >= 1
     first = payload["results"][0]

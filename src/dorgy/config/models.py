@@ -226,8 +226,8 @@ class SearchSettings(DorgyBaseModel):
     """
 
     default_limit: int = 20
-    auto_enable_org: bool = False
-    auto_enable_watch: bool = False
+    auto_enable_org: bool = True
+    auto_enable_watch: bool = True
     embedding_function: Optional[str] = None
 
 
