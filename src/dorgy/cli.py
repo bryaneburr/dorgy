@@ -2454,6 +2454,8 @@ def search(
                     distance_by_id[doc_id] = None
                 if search_status and isinstance(search_status.get("space"), str):
                     space_by_id[doc_id] = str(search_status["space"])
+                else:
+                    space_by_id[doc_id] = space_by_id.get(doc_id) or "cosine"
                 documents_value = documents[idx] if idx < len(documents) else ""
                 if documents_value:
                     snippet_by_id[doc_id] = documents_value

@@ -51,6 +51,8 @@ def test_cli_search_json_results(tmp_path: Path) -> None:
     for entry in payload["results"]:
         assert "document_id" in entry
         assert entry["score"] is None
+        assert entry["distance"] is None
+        assert entry["space"] is None
         assert entry["snippet"] is None or isinstance(entry["snippet"], str)
 
 
@@ -80,6 +82,8 @@ def test_cli_search_filters_and_limits(tmp_path: Path) -> None:
     assert name_payload["results"][0]["snippet"] is None or isinstance(
         name_payload["results"][0]["snippet"], str
     )
+    assert name_payload["results"][0]["distance"] is None
+    assert name_payload["results"][0]["space"] is None
 
     limited_result = runner.invoke(
         cli,
@@ -160,6 +164,8 @@ def test_cli_search_contains_after_org(tmp_path: Path) -> None:
     result_entry = payload["results"][0]
     assert result_entry["relative_path"].endswith("alpha.txt")
     assert result_entry["snippet"]
+    assert result_entry["distance"] is None
+    assert result_entry["space"] is None
 
 
 def test_cli_search_init_store_builds_index(tmp_path: Path) -> None:
@@ -244,6 +250,9 @@ def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
     assert payload["counts"]["matches"] >= 1
     notes = payload.get("notes", {}).get("info", [])
     assert any("Reindexed" in entry for entry in notes)
+    entry = payload["results"][0]
+    assert entry["distance"] is None
+    assert entry["space"] is None
 
     semantic_result = runner.invoke(
         cli,
@@ -255,6 +264,8 @@ def test_cli_search_reindex_refreshes_content(tmp_path: Path) -> None:
     first = semantic_payload["results"][0]
     assert "updated bananas" in (first["snippet"] or "")
     assert first["score"] is not None
+    assert first["distance"] is not None
+    assert first["space"] == "cosine"
 
 
 def test_cli_search_semantic_requires_index(tmp_path: Path) -> None:
@@ -305,4 +316,6 @@ def test_cli_search_semantic_results(tmp_path: Path) -> None:
     first = payload["results"][0]
     assert first["relative_path"].endswith("alpha.txt")
     assert first["score"] is not None
+    assert first["distance"] is not None
+    assert first["space"] == "cosine"
     assert first["snippet"]
