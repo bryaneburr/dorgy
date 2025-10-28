@@ -521,13 +521,16 @@ The project will progress through the following phases. Update the status column
 - `dorgy org` now supports `--with-search/--without-search` (and honours `search.auto_enable_org`) to opt collections into Chromadb indexing immediately after plans are applied. Descriptor previews/vision captions feed directly into `SearchEntry` records, `.dorgy/search.json` manifests are updated, and CLI output notes how many documents were indexed.
 - `dorgy watch --once/--watch` gained matching search toggles, reusing the same lifecycle helpers to upsert newly organized files and delete entries when batch removals execute. Search state metadata stays in sync, manifests roll forward per batch, and `watch` notes surface Chromadb issues instead of failing runs.
 - `dorgy mv` now keeps Chromadb metadata aligned with renamed/moved files by refreshing path metadata in-place (no new embeddings). Search warnings surface through CLI notes and JSON payloads when Chromadb is unavailable.
+- `dorgy search` integrates with Chromadb lifecycle helpers: `--contains` runs substring queries, `--init-store` rebuilds indexes from existing files, `--reindex` drops and rebuilds indexes in-place, `--drop-store` disables search cleanly, and JSON output reports `document_id`s, optional scores, and snippets alongside traditional filters. Unit/CLI tests cover these flows and guard the CLI error UX when indexes are missing.
+- Search now requires collections to have Chromadb indexing enabled. The CLI fails fast when the index is absent or disabled, directing operators to run `dorgy search --init-store` or `dorgy org --with-search` before issuing queries.
+- Chromadb telemetry is disabled by default (`CHROMADB_TELEMETRY_ENABLED=0`) so collections stay local unless operators explicitly opt in.
 - Captured the detailed rollout plan in `notes/chromadb_search_plan.md`, covering document identity, ingestion payload normalization, CLI lifecycle controls, and UX/testing expectations.
 
 ### Next Actions
 
-- Extend the Chromadb lifecycle to `dorgy mv` (metadata updates without recomputing embeddings) and the `dorgy search` command (`--contains`, `--init-store`, `--drop-store`, `--reindex`) so automation can initialize/query indexes without running `org`.
-- Ensure watch/mv/search flows expose Chromadb-derived scores/document IDs in JSON outputs and add coverage for the new CLI switches.
-- Document store lifecycle UX (initialization prompts, deletion guards) as additional commands land.
+- Consider exposing additional embedding metadata (e.g., distances, spaces) in JSON output for advanced automation use cases.
+- Evaluate surfacing Chromadb diagnostic toggles alongside CLI notes so operators can inspect failures without rerunning commands.
+- Document any future integrations (embedding-function overrides, alternative vector stores) and keep search lifecycle UX aligned across README/ARCH/AGENTS/SPEC as features evolve.
 
 ## Phase 8 – Testing & Tooling
 

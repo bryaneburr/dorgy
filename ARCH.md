@@ -26,7 +26,7 @@
 
 ### State-Oriented Commands
 
-`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. Searches apply filters across tags/categories/timestamps, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads.
+`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. `search` requires an active Chromadb index; the CLI errors if a collection has not been initialized via `dorgy org --with-search` or `dorgy search --init-store`. When enabled, search layers Chromadb substring lookups (`where_document{"$contains": ...}`) and semantic queries (`collection.query`) on top of tag/category/date filters, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads.
 
 ## Module Responsibilities
 
@@ -66,7 +66,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### Search Indexing (`src/dorgy/search/`)
 
-`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `initialize`, `upsert`, `update_metadata`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules (`normalize_search_text`, `descriptor_document_text`). `lifecycle.py` adds `ensure_index`/`update_entries`/`delete_entries`/`refresh_metadata`/`drop_index` helpers used by CLI flows so `.dorgy/chroma` stays authoritative as org/watch/mv pipelines mutate state. Metadata-only operations (e.g., `dorgy mv`) reuse the refresh helper to avoid re-embedding when paths change. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
+`index.py` wraps Chromadb using `SearchIndex`, which locks access to a `PersistentClient` rooted at `<collection>/.dorgy/chroma`, maintains a lightweight manifest (`search.json`), and exposes `initialize`, `upsert`, `update_metadata`, `contains`, `query`, `fetch`, `delete`, `drop`, and `status` helpers. `SearchEntry` builds consistent documents/metadata from `FileRecord` instances (reusing normalized tags, categories, timestamps, and needs-review flags) while `text.py` centralizes normalization/truncation rules (`normalize_search_text`, `descriptor_document_text`). `lifecycle.py` adds `ensure_index`/`update_entries`/`delete_entries`/`refresh_metadata`/`drop_index` helpers used by CLI flows so `.dorgy/chroma` stays authoritative as org/watch/mv/search pipelines mutate state. Metadata-only operations (e.g., `dorgy mv`) reuse the refresh helper to avoid re-embedding when paths change, and the `dorgy search` command rebuilds or tears down stores via these helpers before issuing substring or semantic queries. The package is wired through lazy imports so the CLI stays responsive when search is disabled.
 
 ## Data & Caching Layout
 

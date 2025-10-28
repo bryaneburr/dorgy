@@ -41,6 +41,9 @@
   - Potential `--reindex` convenience to rebuild the store in-place.
 - Use Chromadb `collection.query` for semantic lookups, merging results with state metadata for display. Push tag/category filters into `where` clauses (store normalized lists in metadata) and keep existing CLI filtering semantics for safety.
 - Enrich JSON/table outputs with `document_id`, similarity `score`, and a short snippet from the stored document text; respect `--json`, `--summary`, and `--quiet`.
+- ✅ `--contains`, `--init-store`, `--reindex`, and `--drop-store` now share the lifecycle helpers so substring search works even after a standalone rebuild. Friendly errors guide users to initialize indexes, and JSON/table outputs surface `document_id`, optional scores, and document snippets for automation.
+- ✅ The CLI now refuses to run when search is disabled, directing operators to `dorgy search --init-store` / `dorgy org --with-search` before executing substring or semantic queries.
+- 🔜 Wire semantic queries via `collection.query`: ensure embeddings are generated during indexing, return similarity scores in CLI/JSON output, and instruct users to initialize the vector store when embeddings are unavailable.
 
 ### 6. Store Creation/Deletion UX
 - Ensure initialization always targets `<collection>/.dorgy/chroma` and never global paths. Provide clear console messages indicating the exact directory.
@@ -52,5 +55,6 @@
 - Documentation: refresh `README.md`, `ARCH.md`, `SPEC.md` (Phase 7 status + `.dorgy/chroma` layout), root and module-level `AGENTS.md` files, and add Google-style docstrings for new modules.
 - Notes: append session summary to `notes/STATUS.md` when implementation wraps, capturing blockers/next steps for search rollout.
 - Tooling: manage dependencies via `uv` (update `pyproject.toml`/`uv.lock`), and extend CI/pre-commit tests if new modules require dedicated checks.
+- ✅ Added CLI/Chromadb tests for `--contains`/`--init-store`/`--drop-store`, refreshed README/ARCH/SPEC/search AGENTS guidance, and logged the progress snapshot plus semantic-query coverage and the stricter “index required” behaviour.
 
 With the per-collection `.dorgy/chroma` constraint explicit, this plan keeps Chromadb indexing aligned with Dorgy’s existing architecture and automation expectations.

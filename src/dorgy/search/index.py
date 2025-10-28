@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 from dataclasses import dataclass
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from dorgy.state import DEFAULT_STATE_DIRNAME, FileRecord
+
+os.environ.setdefault("CHROMADB_TELEMETRY_ENABLED", "0")
 
 from .text import normalize_search_text
 
@@ -251,6 +254,141 @@ class SearchIndex:
                 kwargs["embedding_function"] = self._embedding_function
             self._collection = client.get_or_create_collection(**kwargs)
             return self._collection
+
+    def contains(
+        self,
+        text: str,
+        *,
+        limit: int | None = None,
+        include_documents: bool = True,
+        where: Mapping[str, Any] | None = None,
+    ) -> dict[str, list[Any]]:
+        """Return entries whose stored document contains ``text``.
+
+        Args:
+            text: Substring used for document filtering.
+            limit: Maximum number of entries returned (None yields all matches).
+            include_documents: Whether to include document payloads alongside metadata.
+            where: Optional Chromadb metadata filter applied in conjunction with
+                the document substring filter.
+
+        Returns:
+            dict[str, list[Any]]: Raw payload returned by Chromadb's ``get`` API.
+
+        Raises:
+            SearchIndexError: If the Chromadb collection cannot be queried.
+        """
+
+        include_fields: list[str] = ["metadatas"]
+        if include_documents:
+            include_fields.append("documents")
+
+        try:
+            collection = self._collection_handle()
+            response = collection.get(
+                where_document={"$contains": text},
+                where=where,
+                limit=limit,
+                include=include_fields,
+            )
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise SearchIndexError(
+                f"Chromadb substring query failed for text '{text}': {exc}"
+            ) from exc
+        response.setdefault("ids", [])
+        response.setdefault("metadatas", [])
+        if include_documents:
+            response.setdefault("documents", [])
+        return response
+
+    def query(
+        self,
+        text: str,
+        *,
+        limit: int | None = None,
+        where: Mapping[str, Any] | None = None,
+        include_documents: bool = True,
+    ) -> dict[str, list[Any]]:
+        """Return semantic query results for ``text`` using Chromadb embeddings.
+
+        Args:
+            text: Query text to embed and compare against stored documents.
+            limit: Maximum number of results to return (Chromadb defaults to 10).
+            where: Optional metadata filters passed to Chromadb.
+            include_documents: Whether to include stored document payloads.
+
+        Returns:
+            dict[str, list[Any]]: Raw payload returned by Chromadb's ``query`` API.
+
+        Raises:
+            SearchIndexError: If the Chromadb collection cannot be queried.
+        """
+
+        include_fields: list[str] = ["metadatas", "distances"]
+        if include_documents:
+            include_fields.append("documents")
+
+        query_kwargs: dict[str, Any] = {
+            "query_texts": [text],
+            "n_results": limit,
+            "include": include_fields,
+        }
+        if where:
+            query_kwargs["where"] = where
+
+        try:
+            collection = self._collection_handle()
+            response = collection.query(**query_kwargs)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise SearchIndexError(
+                f"Chromadb semantic query failed for text '{text}': {exc}"
+            ) from exc
+
+        # Normalise Chromadb payload structure.
+        response.setdefault("ids", [[]])
+        response.setdefault("metadatas", [[]])
+        response.setdefault("distances", [[]])
+        if include_documents:
+            response.setdefault("documents", [[]])
+        return response
+
+    def fetch(
+        self,
+        ids: Sequence[str],
+        *,
+        include_documents: bool = False,
+    ) -> dict[str, list[Any]]:
+        """Return documents and metadata for the provided ``ids``.
+
+        Args:
+            ids: Collection of document identifiers to load.
+            include_documents: Whether to include stored document payloads.
+
+        Returns:
+            dict[str, list[Any]]: Raw payload returned by Chromadb's ``get`` API.
+
+        Raises:
+            SearchIndexError: If the Chromadb collection cannot be queried.
+        """
+
+        unique_ids = list(dict.fromkeys(ids))
+        if not unique_ids:
+            return {"ids": [], "metadatas": [], "documents": [] if include_documents else []}
+
+        include_fields: list[str] = ["metadatas"]
+        if include_documents:
+            include_fields.append("documents")
+
+        try:
+            collection = self._collection_handle()
+            response = collection.get(ids=unique_ids, include=include_fields)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise SearchIndexError(f"Chromadb fetch failed for ids {unique_ids}: {exc}") from exc
+        response.setdefault("ids", [])
+        response.setdefault("metadatas", [])
+        if include_documents:
+            response.setdefault("documents", [])
+        return response
 
     def _create_client(self) -> Any:
         """Instantiate a Chromadb PersistentClient."""

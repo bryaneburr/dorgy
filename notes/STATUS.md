@@ -189,3 +189,9 @@
 - Extended the search lifecycle into `dorgy watch`: added `--with-search`/`--without-search`, honored `search.auto_enable_watch`, and taught `WatchService` to upsert previews/captions plus delete Chromadb entries when batches remove files. CLI/tests now assert `.dorgy/chroma` manifests for watch runs, and docstrings/AGENTS/README/SPEC all reflect the new behaviour.
 - Next actions: wire `dorgy mv` and the `dorgy search` command into the Chromadb lifecycle (init/drop/reindex, contains queries), then surface Chromadb scores/document IDs in CLI outputs.
 - `dorgy mv` now refreshes Chromadb metadata for moved files (when search is enabled) using the new lifecycle helpers; CLI/JSON payloads surface search warnings, and unit tests assert that Chromadb metadata reflects the new archive paths.
+
+## 2025-11-07
+- Wired the `dorgy search` command into Chromadb: substring queries now call `SearchIndex.contains`, `--init-store` rebuilds `.dorgy/chroma` via the ingestion pipeline, semantic lookups use `SearchIndex.query`, and `--drop-store` disables indexing while surfacing collection metadata in notes.
+- Added query helpers (`SearchIndex.contains`/`query`/`fetch`), removed the duplicate metadata builder, refreshed `tests/test_cli_search.py`, and updated README/ARCH/SPEC/search AGENTS plus the Chromadb plan/status notes to cover the stricter “index required” behaviour.
+- Disabled Chromadb telemetry by default via `CHROMADB_TELEMETRY_ENABLED=0`, keeping collections local unless operators explicitly opt in.
+- Next actions: run `uv run pytest` and `uv run pre-commit run --all-files` before merging, then look at a potential `--reindex` helper and future embedding/telemetry surfacing follow-ups.
