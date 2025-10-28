@@ -12,10 +12,10 @@ from dorgy.search import SearchEntry, SearchIndex
 from dorgy.state import FileRecord
 
 
-def _client_factory(collection: MagicMock) -> Callable[[str], MagicMock]:
+def _client_factory(collection: MagicMock) -> Callable[..., MagicMock]:
     """Return a factory that always yields ``collection``."""
 
-    def _factory(_: str) -> MagicMock:
+    def _factory(*_: object, **__: object) -> MagicMock:
         return collection
 
     return _factory

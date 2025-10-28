@@ -13,6 +13,7 @@ from dorgy.cli import cli
 from dorgy.search.index import DEFAULT_COLLECTION_NAME
 
 chromadb = pytest.importorskip("chromadb")
+Settings = pytest.importorskip("chromadb.config").Settings
 
 
 def _env_with_home(tmp_path: Path) -> dict[str, str]:
@@ -145,7 +146,10 @@ def test_cli_mv_updates_search_metadata(tmp_path: Path) -> None:
     mv_result = runner.invoke(cli, ["mv", str(source_path), str(destination)], env=env)
     assert mv_result.exit_code == 0
 
-    client = chromadb.PersistentClient(path=str(root / ".dorgy" / "chroma"))
+    client = chromadb.PersistentClient(
+        path=str(root / ".dorgy" / "chroma"),
+        settings=Settings(anonymized_telemetry=False),
+    )
     collection = client.get_collection(DEFAULT_COLLECTION_NAME)
     record = collection.get(ids=[document_id])
     assert record["ids"] == [document_id]

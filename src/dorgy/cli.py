@@ -190,6 +190,21 @@ def _load_embedding_function(path: str | None) -> Any | None:
         ) from exc
 
 
+def _format_modified_timestamp(value: datetime | None) -> str:
+    """Return a user-friendly timestamp (e.g., 'Mar 7 2024, 12:30PM')."""
+
+    if value is None:
+        return "-"
+    ts = value
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    ts = ts.astimezone()
+    hour = int(ts.strftime("%I"))
+    minute = ts.strftime("%M")
+    period = ts.strftime("%p")
+    return f"{ts.strftime('%b')} {ts.day} {ts.year}, {hour}:{minute}{period}"
+
+
 class _ProgressTask:
     """Manage lifecycle updates for an individual progress task."""
 
@@ -2648,38 +2663,30 @@ def search(
                     summary_only=summary_only,
                 )
             if displayed_matches:
-                table = Table(title=f"Search results for {root}")
+                table = Table(
+                    title=f"Search results for {root}",
+                    box=None,
+                    show_edge=False,
+                    show_lines=False,
+                    pad_edge=False,
+                    header_style="bold",
+                )
                 table.add_column("Path", overflow="fold")
-                table.add_column("Tags", overflow="fold")
-                table.add_column("Categories", overflow="fold")
-                table.add_column("Confidence", justify="right")
-                table.add_column("Needs Review", justify="center")
-                table.add_column("Modified", min_width=24)
-                table.add_column("Document ID", overflow="fold")
-                table.add_column("Relevance", justify="right")
-                table.add_column("Snippet", overflow="fold")
-                for rel_path, record, last_modified, _ in displayed_matches:
-                    snippet = snippet_by_id.get(record.document_id)
-                    if snippet and len(snippet) > 80:
-                        snippet_display = f"{snippet[:77]}..."
+                table.add_column("Modified", overflow="fold")
+                for rel_path, _record, last_modified, _ in displayed_matches:
+                    parts = rel_path.split("/") if rel_path else []
+                    if parts:
+                        filename = parts[-1]
+                        prefix = "/".join(parts[:-1])
+                        if prefix:
+                            path_display = f"{prefix}/[bold]{filename}[/bold]"
+                        else:
+                            path_display = f"[bold]{filename}[/bold]"
                     else:
-                        snippet_display = snippet or "-"
-                    score_value = score_by_id.get(record.document_id)
-                    relevance_text = (
-                        f"{float(score_value):.2%}"
-                        if isinstance(score_value, (int, float))
-                        else "-"
-                    )
+                        path_display = f"[bold]{rel_path}[/bold]"
                     table.add_row(
-                        rel_path,
-                        ", ".join(record.tags) or "-",
-                        ", ".join(record.categories) or "-",
-                        f"{record.confidence:.2f}" if record.confidence is not None else "-",
-                        "Yes" if record.needs_review else "No",
-                        last_modified.isoformat() if last_modified else "-",
-                        record.document_id,
-                        relevance_text,
-                        snippet_display,
+                        path_display,
+                        _format_modified_timestamp(last_modified),
                     )
                 _emit_message(table, mode="detail", quiet=quiet_enabled, summary_only=summary_only)
             else:

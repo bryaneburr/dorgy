@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import threading
 from dataclasses import dataclass
@@ -11,9 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from dorgy.state import DEFAULT_STATE_DIRNAME, FileRecord
+try:  # pragma: no cover - optional dependency
+    from chromadb.config import Settings as _ChromaSettings  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency not installed
+    _ChromaSettings = None  # type: ignore
 
-os.environ.setdefault("CHROMADB_TELEMETRY_ENABLED", "0")
+from dorgy.state import DEFAULT_STATE_DIRNAME, FileRecord
 
 from .text import normalize_search_text
 
@@ -82,9 +84,10 @@ class SearchIndex:
         collection_root: str | Path,
         *,
         embedding_function: Any | None = None,
-        client_factory: Callable[[str], Any] | None = None,
+        client_factory: Callable[..., Any] | None = None,
         state_dirname: str = DEFAULT_STATE_DIRNAME,
         collection_name: str = DEFAULT_COLLECTION_NAME,
+        settings: Any | None = None,
     ) -> None:
         """Initialize the search index wrapper.
 
@@ -107,6 +110,12 @@ class SearchIndex:
         self._client: Any | None = None
         self._collection: Any | None = None
         self._manifest_version = 1
+        if settings is not None:
+            self._settings = settings
+        elif _ChromaSettings is not None:
+            self._settings = _ChromaSettings(anonymized_telemetry=False)
+        else:
+            self._settings = None
 
     @property
     def index_path(self) -> Path:
@@ -245,7 +254,13 @@ class SearchIndex:
                 return self._collection
             self._ensure_index_dir()
             if self._client_factory is not None:
-                client = self._client_factory(str(self._index_dir))
+                if self._settings is not None:
+                    try:
+                        client = self._client_factory(str(self._index_dir), self._settings)
+                    except TypeError:
+                        client = self._client_factory(str(self._index_dir))
+                else:
+                    client = self._client_factory(str(self._index_dir))
             else:
                 client = self._create_client()
             self._client = client
@@ -393,6 +408,11 @@ class SearchIndex:
     def _create_client(self) -> Any:
         """Instantiate a Chromadb PersistentClient."""
 
+        if self._settings is None:
+            raise SearchIndexError(
+                "Chromadb is required for search indexing. "
+                "Install optional dependencies via `uv sync`."
+            )
         try:
             import chromadb  # type: ignore
         except ImportError as exc:
@@ -401,7 +421,10 @@ class SearchIndex:
                 "Install optional dependencies via `uv sync`."
             ) from exc
         self._ensure_index_dir()
-        return chromadb.PersistentClient(path=str(self._index_dir))
+        return chromadb.PersistentClient(
+            path=str(self._index_dir),
+            settings=self._settings,
+        )
 
     def _ensure_index_dir(self) -> None:
         """Ensure the Chromadb directory exists."""
