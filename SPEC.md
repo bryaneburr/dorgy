@@ -117,22 +117,25 @@ llm:
 
 # Processing Options
 processing:
-  process_images: false
+  process_images: true
+  preview_char_limit: 2048
   process_audio: false
+  recurse_directories: false
   follow_symlinks: false
   process_hidden_files: false
-  max_file_size_mb: 100  # Sample files larger than this
-  sample_size_mb: 10     # Size of sample for large files
+  max_file_size_mb: 100      # Files larger than this are sampled
+  sample_size_mb: 10         # Sample size for oversized files
+  parallel_workers: 1
 
   # Locked file handling
   locked_files:
-    action: "copy"  # copy, skip, wait
+    action: "copy"           # copy, skip, wait
     retry_attempts: 3
     retry_delay_seconds: 5
-  
+
   # Corrupted file handling
   corrupted_files:
-    action: "skip"  # skip, quarantine
+    action: "skip"           # skip, quarantine
 
   # Watch service tuning
   watch:
@@ -141,42 +144,26 @@ processing:
     max_batch_items: 128
     error_backoff_seconds: 5.0
     max_error_backoff_seconds: 60.0
+    allow_deletions: false
 
 # Organization Strategies
-organization:  
-  # Naming conflicts
+organization:
   conflict_resolution: "append_number"  # append_number, timestamp, skip
-  
-  # Date-based organization
   use_dates: true
   date_format: "YYYY-MM"
-  
-  # Language handling
-  preserve_language: false  # false = treat as English, true = treat as original language
-  
-  # Metadata preservation
+  preserve_language: false             # false = treat as English, true = preserve origin
   preserve_timestamps: true
   preserve_extended_attributes: true
+  rename_files: false
 
 # Ambiguity Handling
 ambiguity:
-  confidence_threshold: 0.60  # Flag for review if below this
-  max_auto_categories: 3      # Max tags/categories per file
-
-# Performance
-performance:
-  batch_size: 10
-  parallel_workers: 4
-
-# Safety
-safety:
-  dry_run: false
-  auto_backup: true
-  rollback_on_error: true
+  confidence_threshold: 0.60            # Flag for review if below this
+  max_auto_categories: 3                # Max tags/categories per file
 
 # Logging
 logging:
-  level: "WARNING"  # DEBUG, INFO, WARNING, ERROR
+  level: "WARNING"                      # DEBUG, INFO, WARNING, ERROR
   max_size_mb: 100
   backup_count: 5
 
@@ -185,16 +172,18 @@ cli:
   quiet_default: false
   summary_default: false
   status_history_limit: 5
+  progress_enabled: true
+  move_conflict_strategy: "append_number"
+
+# Search Defaults
+search:
+  default_limit: 5
+  auto_enable_org: true
+  auto_enable_watch: true
+  embedding_function: null             # Optional dotted path override
 
 # User-defined Rules (optional)
-rules:
-  # Example: Force certain patterns to specific categories
-  - pattern: "invoice-*.pdf"
-    category: "Finance/Invoices"
-    priority: high
-  - pattern: "*.tax"
-    category: "Finance/Taxes"
-    priority: high
+rules: []
 ```
 
 ### Organized Collections
@@ -202,11 +191,17 @@ rules:
 When `dorgy` organizes a collection of files, it creates a `.dorgy/` directory at the top top level of the organized directory.
 
 Inside this directory are the following data:
-- `.dorgy/chroma/`: `chromadb` chroma store for collection
-- `.dorgy/quarantine`: For corrupted files if config `processing.corrupted_files.action = 'quarantine'`
-- `.dorgy/needs-review`: For files that fall below `ambiguity.confidence_threshold`
-- `.dorgy/dorgy.log`: Log file
-- `.dorgy/orig.json`: Original file structure, so we can restore the files to their original pre-organizational structure using `dorgy undo`
+- `.dorgy/state.json`: Current collection metadata (paths, hashes, document IDs, search status).
+- `.dorgy/history.jsonl`: Append-only operation history for automation and audits.
+- `.dorgy/chroma/`: `chromadb` index storage for semantic search.
+- `.dorgy/search.json`: Manifest describing the search index (counts, timestamps, enablement flags).
+- `.dorgy/classifications.json`: Cached DSPy/LLM classification results reused by subsequent runs.
+- `.dorgy/vision.json`: Cached image captions when `processing.process_images` is enabled.
+- `.dorgy/quarantine/`: Destination for corrupted files when `processing.corrupted_files.action = 'quarantine'`.
+- `.dorgy/needs-review/`: Staging area for low-confidence classifications below `ambiguity.confidence_threshold`.
+- `.dorgy/watch.log`: Rolling log written by `dorgy watch` batches.
+- `.dorgy/dorgy.log`: Execution log shared by CLI runs.
+- `.dorgy/orig.json`: Snapshot of the original file structure used by `dorgy undo`.
 
 ### DSPy Integration Strategy
 
@@ -318,7 +313,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 4.5 – CLI Polish & UX | Consistent summaries, `--summary/--quiet` toggles, executed `--json` parity, CLI config defaults, structured error payloads |
 | [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
-| [ ] | Phase 5.8 – Vision-Enriched Classification | Leverage `processing.process_images` to capture captions/tags, enrich descriptors with image summaries, extend classifier/tests/docs |
+| [x] | Phase 5.8 – Vision-Enriched Classification | Leverage `processing.process_images` to capture captions/tags, enrich descriptors with image summaries, extend classifier/tests/docs |
 | [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [x] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [x] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
@@ -471,38 +466,29 @@ The project will progress through the following phases. Update the status column
 
 ## Phase 5.8 – Vision-Enriched Classification
 
-- `processing.process_images` enables multimodal captioning that generates textual descriptions, key entities, and confidence scores for images and other visual assets; descriptors carry these summaries so DSPy receives meaningful context.
-- Captioning output is captured by a DSPy program that uses `dspy.Image` inputs with the configured LLM; results are stored alongside existing classification cache metadata and reused by ingest/watch pipelines.
-- Classifier heuristics fall back to the captions/tags when DSPy is disabled, while CLI/JSON outputs expose the captured vision metadata for automation.
-- Optional Pillow plugins (e.g., `pillow-heif`, `pillow-avif-plugin`, `pillow-avif`, `pillow-jxl`, `pillow-jxl-plugin`) are auto-registered when present so HEIC/AVIF/JPEG XL assets flow through the captioner without additional configuration.
+### Progress Summary
+- `processing.process_images` now defaults to true, enabling multimodal captioning that enriches descriptors with textual summaries, entities, and confidence scores for downstream planners.
+- Captioning runs through a DSPy-backed `VisionCaptioner` that reuses cached results in `.dorgy/vision.json`, keeping `org` and `watch` runs efficient while sharing metadata with automations.
+- CLI/JSON payloads surface captured vision metadata and emit warnings when the configured LLM lacks vision capabilities, ensuring operators and automation see when captions were suppressed.
+- Optional Pillow plugins (e.g., `pillow-heif`, `pillow-avif-plugin`, `pillow-avif`, `pillow-jxl`, `pillow-jxl-plugin`) are auto-registered so HEIC/AVIF/JPEG XL assets receive captions without additional configuration.
 
-### Goals
-- Reuse the configured `llm.model` for captioning when `process_images` is true by invoking a dedicated DSPy signature that accepts `dspy.Image` inputs; surface clear errors when the model lacks vision capabilities.
-- Extend ingestion to request captions when `process_images` is true, normalize summaries/labels into descriptors (`preview`, `metadata["vision_caption"]`, `tags`), and persist them in the classification cache for reuse.
-- Thread user-provided prompts into caption requests so image summaries respect the same context as text classification.
-- Update classification/organization flows to consume the enriched metadata, adjusting prompts (DSPy) and heuristics so images can be categorized beyond MIME types.
-- Document configuration expectations (model requirements, error messaging) in SPEC, AGENTS, and CLI help.
+### Implementation Notes
+- Caption requests reuse the configured `llm.model`; missing credentials or non-vision models gracefully disable captioning while logging actionable notes.
+- Ingestion normalizes vision summaries into descriptor metadata (`metadata["vision_caption"]`, derived tags) and persists them in `classifications.json` / `vision.json` caches for reuse.
+- User-supplied prompt overrides propagate into caption requests so image summaries respect the same context as text classification prompts.
+- README, SPEC, ARCH, and module AGENTS documentation describe model expectations, caching semantics, and CLI warnings so automation consumers can integrate vision metadata reliably.
 
-### Deliverables
-- `VisionCaptioner` DSPy module that wraps the existing LLM configuration, honors user prompts, and includes a caching strategy plus integration tests covering happy-path captions and failure fallback.
-- Updated ingestion metadata extractor and classification cache schema supporting vision payloads plus migration handling for existing cache entries.
-- Expanded classification engine tests ensuring DSPy payloads contain caption/text pairs, along with fixtures verifying heuristic improvements.
-- CLI JSON payloads (`org`, `watch`) now emit a `vision` object per file when captions are available, and SPEC/AGENTS documentation captures the new automation hooks.
-- Collection state records persist caption metadata (`vision_caption`, `vision_labels`, `vision_confidence`, `vision_reasoning`) so downstream history/export tooling retains image context.
-- Image loading fallbacks rely on Pillow to convert unsupported formats to PNG before invoking DSPy, ensuring HEIC/AVIF/JXL/ICO/BMP assets participate in captioning when the relevant plugins are installed.
+### Ongoing Risks
+- **Latency/Cost:** Captioning introduces additional LLM calls; retry/backoff policies and per-run limits remain in place, and CLI notes surface when captions are skipped.
+- **Model Drift:** Backend-specific prompt/response parsing is encapsulated in adapters with unit tests, but integrators should monitor provider updates that might change response formats.
+- **Privacy/Security:** Operators can opt out via `processing.process_images` or CLI flags; runs log when captions are bypassed to support auditing requirements.
 
-### Risks & Mitigations
-- **Latency/Cost:** Run captioning asynchronously with retry/backoff and enforce per-run limits; provide CLI notes when captions are skipped due to model errors.
-- **Model Drift:** Encapsulate backend-specific prompts/response parsing in adapters with unit tests; surface informative errors when API capabilities are missing.
-- **Privacy/Security:** Honour `processing.process_images` or CLI flags to opt out per-run and log when files are skipped to aid auditing.
-
-### Future Work – Image-only PDF OCR Plan
-- **Detection:** Augment the ingestion pipeline to flag PDFs whose pages lack textual content after Docling extraction, treating them as image-only candidates.
-- **Rendering:** Use a headless renderer (`pdf2image`, Poppler bindings, or Docling page rasterisation) to convert flagged pages into high-resolution images buffered in memory.
-- **OCR Pass:** Invoke a configurable OCR engine (initially Tesseract via `pytesseract`) to extract text per page, merging results into the descriptor preview/metadata while capturing confidence metrics.
-- **Caching & Reuse:** Store OCR text alongside the existing classification cache entries to avoid reprocessing unchanged PDFs; leverage document hash to key the cache.
-- **CLI & Config:** Add configuration toggles (`processing.process_pdf_images`, OCR language choices) and surface progress/summary notes so users understand when OCR was applied or skipped.
-- **Testing:** Provide fixtures covering mixed-content PDFs (text + image), true image-only scans, and multi-language documents to ensure detection heuristics and OCR fallbacks behave correctly.
+### Future Work – Image-only PDF OCR
+- **Detection:** Continue exploring ingestion heuristics that identify image-only PDFs after Docling extraction so they can trigger OCR.
+- **Rendering:** Evaluate headless renderers (`pdf2image`, Docling rasterisation) to convert flagged pages into high-resolution images for OCR without excessive memory overhead.
+- **OCR Pass:** Prototype a Tesseract-based path (via `pytesseract`) to merge extracted text into descriptor previews while capturing per-page confidence and retaining original images.
+- **Caching & Reuse:** Reuse classification hashes to avoid reprocessing unchanged PDFs, storing OCR output alongside existing caches.
+- **CLI & Config:** Shape toggles (`processing.process_pdf_images`, OCR languages) and surface progress/summary notes so operators know when OCR was applied or skipped.
 
 ## Phase 6 – CLI Surface
 

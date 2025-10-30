@@ -196,11 +196,11 @@ We ship an Invoke task collection that wraps the `uv` toolchain so day-to-day au
 
 ## Roadmap
 
-- `SPEC.md` tracks implementation phases and current status (Phase 9 – Distribution & Release Prep is underway; Phase 7 search/indexing work is queued next).
+- `SPEC.md` tracks implementation phases and current status (Phase 9 – Distribution & Release Prep is underway; Phase 5.8 – Vision-Enriched Classification recently wrapped).
 - `notes/STATUS.md` logs day-to-day progress, blockers, and next actions.
 - Module-specific coordination details live in `src/dorgy/**/AGENTS.md`.
 
-Upcoming milestones include vision-enriched classification refinements, enhanced CLI ergonomics, and expanded search/indexing APIs.
+Upcoming milestones include the image-only OCR follow-up for vision pipelines, CLI ergonomics work in Phase 6, and continued distribution/release automation.
 
 ---
 
