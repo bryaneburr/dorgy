@@ -106,7 +106,7 @@ Both human-readable and JSON modes surface persistent `document_id`s, optional s
 - `organization` controls renaming and conflict strategies (append number, timestamp, skip) and timestamp preservation. Automatic renaming is disabled by default (`organization.rename_files: false`) so classification runs remain non-destructive unless you opt in.
 - `cli` toggles defaults for quiet/summary modes, Rich progress indicators, and move conflict handling (legacy configs may still surface `cli.search_default_limit`, but new installs should use the `search` block instead).
 - `search` governs Chromadb-backed indexing (default result limits, whether `org`/`watch` auto-maintain the store, and optional embedding function overrides). Stores live beside `state.json` under `<collection>/.dorgy/chroma`; indexing is enabled by default, but you can pass `--without-search` (or set config values) to skip runs, use `dorgy search --init-store` to rebuild indexes, and `dorgy search --drop-store` to remove them safely.
-- Chromadb telemetry is disabled by default (`CHROMADB_TELEMETRY_ENABLED=0`) so collections stay local. Set the variable to `1` if you intentionally want to opt into telemetry.
+- Chromadb telemetry is disabled by default because the client is instantiated with `anonymized_telemetry=False`. If you intentionally want to opt into telemetry, override the setting (for example by exporting `CHROMADB_TELEMETRY_ENABLED=1` before running commands).
 - Watch services share the organization pipeline and respect `processing.watch.allow_deletions` unless `--allow-deletions` is passed.
 - LLM models are configured through the `llm` block. The default target is `openai/gpt-5`; provide any LiteLLM-compatible identifier (for example `openai/gpt-4o-mini` or `openrouter/gpt-4o-mini:free`) via `llm.model`, supply `llm.api_key`/`llm.api_base_url` when required, and set `DORGY_USE_FALLBACKS=1` only when explicitly exercising heuristic classifiers in development.
 
@@ -196,11 +196,11 @@ We ship an Invoke task collection that wraps the `uv` toolchain so day-to-day au
 
 ## Roadmap
 
-- `SPEC.md` tracks implementation phases and current status (Phase 9 – Distribution & Release Prep is underway; Phase 7 search/indexing work is queued next).
+- `SPEC.md` tracks implementation phases and current status (Phase 9 – Distribution & Release Prep is underway; Phase 5.8 – Vision-Enriched Classification recently wrapped).
 - `notes/STATUS.md` logs day-to-day progress, blockers, and next actions.
 - Module-specific coordination details live in `src/dorgy/**/AGENTS.md`.
 
-Upcoming milestones include vision-enriched classification refinements, enhanced CLI ergonomics, and expanded search/indexing APIs.
+Upcoming milestones include the image-only OCR follow-up for vision pipelines, CLI ergonomics work in Phase 6, and continued distribution/release automation.
 
 ---
 

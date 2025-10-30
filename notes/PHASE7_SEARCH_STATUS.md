@@ -7,9 +7,8 @@
 
 ## Work Remaining
 
-1. Consider a `--reindex` wrapper for automation (full rebuild without filters) and decide whether to expose additional embedding metadata when available.
-2. Monitor Chromadb telemetry changes (currently disabled by default) and document any follow-up controls if upstream behaviour shifts.
-3. Continue running `uv run pytest` / `uv run pre-commit run --all-files` before promoting Phase 7 changes to `main`.
+1. Monitor Chromadb telemetry changes (currently disabled by default) and document any follow-up controls if upstream behaviour shifts.
+2. Continue running `uv run pytest` / `uv run pre-commit run --all-files` before promoting Phase 7 changes to `main`.
 
 ## Staged Files
 

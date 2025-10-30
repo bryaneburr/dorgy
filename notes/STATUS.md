@@ -1,5 +1,10 @@
 # Status Log
 
+## 2025-11-08
+- Updated documentation after wrapping Phase 5.8: refreshed `SPEC.md` defaults/sample config, `.dorgy/` artifact list, and vision progress notes; adjusted `README.md` roadmap/upcoming work; and clarified architecture guidance around vision caches.
+- Confirmed Phase 5.8 is marked complete in tables and narrative sections; captured ongoing risks plus future image-only PDF OCR follow-up items.
+- Next actions: continue Phase 6 CLI ergonomics polish, audit module AGENTS docs for gaps introduced by recent refactors, and run `uv run pre-commit run --all-files` before the next documentation push.
+
 ## 2025-10-14
 - Initialized tracking scheme; updated `SPEC.md` implementation phases and expanded coordination directives in `AGENTS.md`.
 - Added this status log to capture ongoing progress, blockers, and next steps.
