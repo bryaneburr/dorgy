@@ -43,7 +43,7 @@
 - Enrich JSON/table outputs with `document_id`, similarity `score`, and a short snippet from the stored document text; respect `--json`, `--summary`, and `--quiet`.
 - ✅ `--contains`, `--init-store`, `--reindex`, and `--drop-store` now share the lifecycle helpers so substring search works even after a standalone rebuild. Search indexing is enabled by default during `org`/`watch` runs (use `--without-search` to skip), friendly errors guide users to initialize when disabled, and JSON/table outputs surface `document_id`, optional scores, distances, spaces, and document snippets for automation.
 - ✅ The CLI now refuses to run when search is disabled, directing operators to `dorgy search --init-store` / `dorgy org --with-search` before executing substring or semantic queries.
-- 🔜 Wire semantic queries via `collection.query`: ensure embeddings are generated during indexing, return similarity scores in CLI/JSON output, and instruct users to initialize the vector store when embeddings are unavailable.
+- ✅ Wired semantic queries via `SearchIndex.query`, returning similarity scores, distances, and snippets when the index is available; CLI guidance now directs operators to initialize the vector store when embeddings are missing.
 
 ### 6. Store Creation/Deletion UX
 - Ensure initialization always targets `<collection>/.dorgy/chroma` and never global paths. Provide clear console messages indicating the exact directory.

@@ -203,10 +203,10 @@
    - Update command docstrings/help examples to reflect the standard flag set.
 
 2. **`dorgy search` Implementation**
-   - Deliver read-only search that queries the existing `.dorgy/state.json` (Phase 7 will swap in semantic index).
-   - Support filters for filename glob, tags, categories, needs-review, and modified date range.
-   - Provide paginated/limited output with `--json`, `--summary`, and default Rich table rendering (fallback to plain text if Rich unavailable).
-   - Add integration tests covering empty state, basic matches, combined filters, and JSON output.
+   - Wire Chromadb lifecycle helpers so substring and semantic queries operate on per-collection indexes stored under `.dorgy/chroma`, while surfacing actionable errors when search is disabled.
+   - Continue supporting filename glob, tag/category, needs-review, and modified-date filters alongside Chromadb results so legacy workflows behave consistently.
+   - Provide paginated/limited output with `--json`, `--summary`, and Rich table rendering (fallback to plain text if Rich unavailable), including document IDs, scores, distances, and snippets returned from the index.
+   - Add integration tests covering semantic lookup, substring filtering, combined filters, and JSON output paths.
 
 3. **`dorgy mv` Implementation**
    - Implement move/rename command that updates the filesystem, state records, and history using the organization executor.

@@ -523,7 +523,7 @@ The project will progress through the following phases. Update the status column
 - `dorgy mv` now keeps Chromadb metadata aligned with renamed/moved files by refreshing path metadata in-place (no new embeddings). Search warnings surface through CLI notes and JSON payloads when Chromadb is unavailable.
 - `dorgy search` integrates with Chromadb lifecycle helpers: `--contains` runs substring queries, `--init-store` rebuilds indexes from existing files, `--reindex` drops and rebuilds indexes in-place, `--drop-store` disables search cleanly, and JSON output reports `document_id`s, optional scores, and snippets alongside traditional filters. Unit/CLI tests cover these flows and guard the CLI error UX when indexes are missing.
 - Search now requires collections to have Chromadb indexing enabled. The CLI fails fast when the index is absent or disabled, directing operators to run `dorgy search --init-store` or re-run `dorgy org` (indexing is automatic unless explicitly skipped with `--without-search`).
-- Chromadb telemetry is disabled by default (`CHROMADB_TELEMETRY_ENABLED=0`) so collections stay local unless operators explicitly opt in.
+- Chromadb telemetry is disabled by default because the Chromadb client is constructed with `anonymized_telemetry=False`. Operators who need telemetry can opt in by exporting `CHROMADB_TELEMETRY_ENABLED=1` (or equivalent settings) before running commands.
 - Captured the detailed rollout plan in `notes/chromadb_search_plan.md`, covering document identity, ingestion payload normalization, CLI lifecycle controls, and UX/testing expectations.
 
 ### Next Actions
