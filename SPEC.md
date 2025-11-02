@@ -314,7 +314,7 @@ The project will progress through the following phases. Update the status column
 | [x] | Phase 5 – Watch Service | `watchdog` observer with debounce/backoff, batch pipeline reuse, incremental state/log updates, `dorgy watch` CLI |
 | [x] | Phase 5.5 – Watch Deletions & External Moves | Detect removals/moves-out, DeleteOperation support, opt-in safeguards, deletion-aware summaries/JSON |
 | [x] | Phase 5.8 – Vision-Enriched Classification | Leverage `processing.process_images` to capture captions/tags, enrich descriptors with image summaries, extend classifier/tests/docs |
-| [~] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
+| [x] | Phase 6 – CLI Surface | Deliver `org`, `watch`, `config`, `search`, `mv`, `undo` commands with Rich/TQDM feedback |
 | [x] | Phase 7 – Search & Metadata APIs | `chromadb`-backed semantic search, tag/date filters, `mv` metadata updates |
 | [x] | Phase 8 – Testing & Tooling | `uv` workflow, pre-commit hooks (format/lint/import-sort/pytest), unit/integration coverage |
 | [~] | Phase 9 – Distribution & Release Prep | PyPI metadata polish, TestPyPI validation, release documentation, CI gating for publishing |
@@ -492,6 +492,7 @@ The project will progress through the following phases. Update the status column
 
 ## Phase 6 – CLI Surface
 
+- Refactored the monolithic `src/dorgy/cli.py` into a dedicated package (`cli/app.py`, `cli/commands/*`, `cli/helpers/*`, `cli/lazy.py`) so command implementations stay focused, shared helpers remain testable, and lazy-loading continues to guard startup time.
 - Introduced `dorgy search` with glob, tag, category, needs-review, and date-range filters plus JSON output that mirrors prior CLI schemas; defaults (including result limits) honor `search.default_limit` (falling back to `cli.search_default_limit` for legacy configs).
 - Implemented `dorgy mv` using the organization executor to preserve staging/rollback guarantees while updating state/history; supports dry-run, JSON payloads, and configurable conflict strategies (append number, timestamp, skip).
 - Added Rich-powered progress indicators for `dorgy org` and `dorgy watch --once`, automatically disabled for JSON/quiet/non-TTY contexts and controllable via `cli.progress_enabled`.

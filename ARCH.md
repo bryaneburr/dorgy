@@ -4,7 +4,7 @@
 
 ## System Overview
 
-- Runtime is anchored by `main.py` and `src/dorgy/__main__.py`, which forward to `dorgy.cli.main`. The CLI is implemented with Click and loads heavy dependencies lazily so startup remains fast even on large environments.
+- Runtime is anchored by `main.py` and `src/dorgy/__main__.py`, which forward to `dorgy.cli.main`. The CLI now lives in the `src/dorgy/cli/` package: `app.py` wires the Click group, `commands/` houses per-command builders, `helpers/` centralize progress/output/state utilities, and `lazy.py` keeps heavy dependencies lazily loaded so startup remains fast.
 - Commands funnel through shared helpers that normalize quiet/summary/JSON modes, yielding identical human and machine-readable outputs across organization, watch, search, move, status, undo, and config operations.
 - Core workflows revolve around a pipeline that discovers candidate files, extracts metadata, classifies items with DSPy-backed or heuristic models, plans renames/moves, executes them safely, and records state for auditing and undo.
 - Persistent metadata and caches live in `.dorgy/` under each collection root, enabling reversible operations and incremental processing.
@@ -13,7 +13,7 @@
 
 ### CLI Entry & Command Dispatch
 
-`dorgy.cli` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, and the nested `config` group. The module maintains `_LAZY_ATTRS` alongside `__getattr__`/`_load_dependency` to import heavyweight modules (classification, ingestion, watch, organization, state) only when a command actually needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) funnels through helpers so adding new commands automatically benefits from consistent UX.
+`dorgy.cli.app` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, and the nested `config` group. Command implementations live in `dorgy.cli.commands.*`, while `_LAZY_ATTRS` plus `__getattr__`/`_load_dependency` in `dorgy.cli.lazy` defer heavyweight imports (classification, ingestion, watch, organization, state) until a command needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) flows through `dorgy.cli.helpers.*` so new commands automatically inherit consistent UX.
 
 ### Organization & Watch Pipeline
 
@@ -30,9 +30,9 @@
 
 ## Module Responsibilities
 
-### CLI Layer (`src/dorgy/cli.py`, `src/dorgy/__init__.py`, `main.py`)
+### CLI Layer (`src/dorgy/cli/`, `src/dorgy/__init__.py`, `main.py`)
 
-Implements command registration, lazy dependency loading, unified error handling, progress/output helpers, and graceful shutdown handling. `cli_options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. `cli_support.py` centralizes cross-command helpers: prompt resolution, classification orchestration (`run_classification`), decision/descriptor zipping, watch batch rendering, and summary computations. `dorgy.shutdown` installs SIGINT/SIGTERM handlers so Ctrl+C sets a shared event, allowing ingestion, classification, and watch loops to unwind quickly before the CLI exits with code 130.
+`app.py` defines the root Click group and registers per-command builders from `commands/`. Shared output, parsing, state, progress, and search helpers live under `helpers/`, while `lazy.py` preserves the `_LAZY_ATTRS` map used by `__getattr__`/`_load_dependency` to defer heavyweight imports. `cli_options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. `cli_support.py` centralizes cross-command helpers: prompt resolution, classification orchestration (`run_classification`), decision/descriptor zipping, watch batch rendering, and summary computations. `dorgy.shutdown` installs SIGINT/SIGTERM handlers so Ctrl+C sets a shared event, allowing ingestion, classification, and watch loops to unwind quickly before the CLI exits with code 130.
 
 ### Configuration (`src/dorgy/config/`)
 
