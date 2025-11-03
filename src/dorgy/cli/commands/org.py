@@ -11,11 +11,8 @@ import click
 from rich.table import Table
 
 from dorgy.cli.context import LOGGER, console
-from dorgy.cli.helpers.formatting import (
-    _descriptor_size,
-    _format_size,
-    _render_tree,
-)
+from dorgy.cli.helpers.classification import run_classification, zip_decisions
+from dorgy.cli.helpers.formatting import _descriptor_size, _format_size, _render_tree
 from dorgy.cli.helpers.messages import (
     _collect_llm_metadata,
     _emit_errors,
@@ -24,10 +21,7 @@ from dorgy.cli.helpers.messages import (
     _handle_cli_error,
     _llm_summary,
 )
-from dorgy.cli.helpers.progress import INGESTION_STAGE_LABELS, _ProgressScope, _ProgressTask
-from dorgy.cli.helpers.search import _load_embedding_function
-from dorgy.cli.lazy import _load_dependency
-from dorgy.cli_options import (
+from dorgy.cli.helpers.options import (
     ModeResolution,
     classify_prompt_file_option,
     classify_prompt_option,
@@ -41,6 +35,16 @@ from dorgy.cli_options import (
     structure_prompt_option,
     summary_option,
 )
+from dorgy.cli.helpers.organization import collect_error_payload, compute_org_counts
+from dorgy.cli.helpers.progress import INGESTION_STAGE_LABELS, _ProgressScope, _ProgressTask
+from dorgy.cli.helpers.prompts import resolve_prompt_text
+from dorgy.cli.helpers.search import _load_embedding_function
+from dorgy.cli.helpers.state import (
+    build_original_snapshot,
+    descriptor_to_record,
+    relative_to_collection,
+)
+from dorgy.cli.lazy import _load_dependency
 from dorgy.config import ConfigError, ConfigManager
 from dorgy.shutdown import ShutdownRequested
 
@@ -110,17 +114,6 @@ def org(
     Raises:
         click.ClickException: When validation fails before executing the pipeline.
     """
-
-    from dorgy.cli_support import (
-        build_original_snapshot,
-        collect_error_payload,
-        compute_org_counts,
-        descriptor_to_record,
-        relative_to_collection,
-        resolve_prompt_text,
-        run_classification,
-        zip_decisions,
-    )
 
     ClassificationCacheCls = _load_dependency(
         "ClassificationCache", "dorgy.classification", "ClassificationCache"

@@ -4,14 +4,150 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 import click
 
 from dorgy.cli.lazy import _load_dependency
 
 if TYPE_CHECKING:
+    from dorgy.ingestion import FileDescriptor
     from dorgy.state import CollectionState, FileRecord
+
+
+def relative_to_collection(path: Path, root: Path) -> str:
+    """Return ``path`` relative to ``root`` when possible."""
+
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def build_original_snapshot(
+    descriptors: Iterable["FileDescriptor"],
+    root: Path,
+) -> dict[str, Any]:
+    """Create a snapshot of pre-organization descriptors."""
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    entries: list[dict[str, Any]] = []
+    directories: set[str] = set()
+    root_resolved = root.resolve()
+    for descriptor in descriptors:
+        entries.append(
+            {
+                "path": relative_to_collection(descriptor.path, root),
+                "display_name": descriptor.display_name,
+                "mime_type": descriptor.mime_type,
+                "hash": descriptor.hash,
+                "size_bytes": descriptor.metadata.get("size_bytes"),
+                "tags": list(descriptor.tags),
+            }
+        )
+
+        current = descriptor.path.resolve().parent
+        while True:
+            try:
+                relative_dir = current.relative_to(root_resolved)
+            except ValueError:
+                break
+            if not relative_dir.parts:
+                break
+            directories.add(relative_dir.as_posix())
+            if current == root_resolved:
+                break
+            current = current.parent
+
+    return {
+        "generated_at": generated_at,
+        "entries": entries,
+        "directories": sorted(directories),
+    }
+
+
+def descriptor_to_record(
+    descriptor: "FileDescriptor",
+    decision: Optional[Any],
+    root: Path,
+) -> "FileRecord":
+    """Convert a descriptor and decision into a state record."""
+
+    FileRecord = _load_dependency("FileRecord", "dorgy.state", "FileRecord")
+
+    try:
+        relative = descriptor.path.relative_to(root)
+    except ValueError:
+        relative = descriptor.path
+
+    last_modified = None
+    modified_raw = descriptor.metadata.get("modified_at")
+    if modified_raw:
+        try:
+            normalized = (
+                modified_raw.replace("Z", "+00:00") if modified_raw.endswith("Z") else modified_raw
+            )
+            last_modified = datetime.fromisoformat(normalized)
+        except ValueError:
+            last_modified = None
+
+    categories: list[str] = []
+    tags: list[str] = descriptor.tags
+    confidence: Optional[float] = None
+    rename_suggestion: Optional[str] = None
+    reasoning: Optional[str] = None
+    needs_review = False
+    vision_caption = descriptor.metadata.get("vision_caption")
+    raw_labels = descriptor.metadata.get("vision_labels")
+    if isinstance(raw_labels, list):
+        vision_labels = [str(label).strip() for label in raw_labels if str(label).strip()]
+    elif isinstance(raw_labels, str):
+        vision_labels = [part.strip() for part in raw_labels.split(",") if part.strip()]
+    else:
+        vision_labels = []
+
+    raw_confidence = descriptor.metadata.get("vision_confidence")
+    vision_confidence: Optional[float] = None
+    if isinstance(raw_confidence, (int, float)):
+        vision_confidence = float(raw_confidence)
+    elif isinstance(raw_confidence, str):
+        try:
+            vision_confidence = float(raw_confidence)
+        except ValueError:
+            vision_confidence = None
+
+    vision_reasoning = descriptor.metadata.get("vision_reasoning")
+    if isinstance(vision_reasoning, str) and not vision_reasoning.strip():
+        vision_reasoning = None
+    if vision_caption is not None and isinstance(vision_caption, str):
+        vision_caption = vision_caption.strip() or None
+    else:
+        vision_caption = None
+
+    if decision is not None:
+        categories = [decision.primary_category]
+        categories.extend(decision.secondary_categories)
+        tags = decision.tags or categories
+        confidence = decision.confidence
+        rename_suggestion = decision.rename_suggestion
+        reasoning = decision.reasoning
+        needs_review = decision.needs_review
+
+    return FileRecord(
+        path=str(relative),
+        hash=descriptor.hash,
+        tags=tags,
+        categories=categories,
+        confidence=confidence,
+        last_modified=last_modified,
+        rename_suggestion=rename_suggestion,
+        reasoning=reasoning,
+        needs_review=needs_review,
+        vision_caption=vision_caption,
+        vision_labels=vision_labels,
+        vision_confidence=vision_confidence,
+        vision_reasoning=vision_reasoning,
+    )
 
 
 def _normalise_state_key(value: str) -> str:
@@ -127,12 +263,6 @@ def _plan_state_changes(
         click.ClickException: If the source path is not tracked.
     """
 
-    relative_to_collection = _load_dependency(
-        "relative_to_collection",
-        "dorgy.cli_support",
-        "relative_to_collection",
-    )
-
     source_rel = _normalise_state_key(relative_to_collection(source, root))
     dest_rel = _normalise_state_key(relative_to_collection(destination, root))
     mappings: list[tuple[str, str]] = []
@@ -194,4 +324,7 @@ __all__ = [
     "_normalise_state_key",
     "_plan_state_changes",
     "_resolve_move_destination",
+    "build_original_snapshot",
+    "descriptor_to_record",
+    "relative_to_collection",
 ]

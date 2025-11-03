@@ -32,14 +32,12 @@ from dorgy.classification import (
     VisionCache,
     VisionCaptioner,
 )
-from dorgy.cli_support import (
+from dorgy.cli.helpers.classification import run_classification, zip_decisions
+from dorgy.cli.helpers.organization import collect_error_payload, compute_org_counts
+from dorgy.cli.helpers.state import (
     build_original_snapshot,
-    collect_error_payload,
-    compute_org_counts,
     descriptor_to_record,
     relative_to_collection,
-    run_classification,
-    zip_decisions,
 )
 from dorgy.config import DorgyConfig
 from dorgy.ingestion import IngestionPipeline

@@ -10,8 +10,7 @@ import click
 from dorgy.cli.context import console
 from dorgy.cli.helpers.formatting import _format_history_event
 from dorgy.cli.helpers.messages import _emit_message, _format_summary_line, _handle_cli_error
-from dorgy.cli.lazy import _load_dependency
-from dorgy.cli_options import (
+from dorgy.cli.helpers.options import (
     ModeResolution,
     dry_run_option,
     json_option,
@@ -19,6 +18,7 @@ from dorgy.cli_options import (
     resolve_mode_settings,
     summary_option,
 )
+from dorgy.cli.lazy import _load_dependency
 from dorgy.config import ConfigError, ConfigManager
 
 

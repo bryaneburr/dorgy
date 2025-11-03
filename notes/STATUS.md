@@ -186,7 +186,7 @@
 - Threaded organizer prompts into `StructurePlanner.propose`, updated CLI call sites, and extended coverage/AGENTS/ARCH guidance so structure recommendations respect user instructions.
 - Next actions: run `uv run pytest tests/test_structure_planner.py` and `uv run pre-commit run --files src/dorgy/classification/structure.py tests/test_structure_planner.py` before opening the PR.
 - Introduced `--classify-prompt`/`--structure-prompt` (plus file variants) on `org`/`watch`, split prompt plumbing across classification and structure planning, refreshed docs/tests, and kept JSON compatibility via legacy `context.prompt`.
-- Next actions: execute `uv run pre-commit run --files src/dorgy/cli.py src/dorgy/cli_support.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
+- Next actions: execute `uv run pre-commit run --files src/dorgy/cli/commands/org.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
 
 ## 2025-11-06
 - Began Phase 7 implementation by extending `FileRecord` with persistent `document_id`s, adding `CollectionState.search` metadata, and teaching `StateRepository` to normalize timestamps/IDs plus persist `.dorgy/search.json`; backfilled IDs are saved automatically during load migrations.

@@ -9,16 +9,7 @@ import click
 
 from dorgy.cli.context import console
 from dorgy.cli.helpers.messages import _emit_message, _format_summary_line, _handle_cli_error
-from dorgy.cli.helpers.search import _load_embedding_function
-from dorgy.cli.helpers.state import (
-    _apply_state_changes,
-    _detect_collection_root,
-    _normalise_state_key,
-    _plan_state_changes,
-    _resolve_move_destination,
-)
-from dorgy.cli.lazy import _load_dependency
-from dorgy.cli_options import (
+from dorgy.cli.helpers.options import (
     ModeResolution,
     dry_run_option,
     json_option,
@@ -26,6 +17,16 @@ from dorgy.cli_options import (
     resolve_mode_settings,
     summary_option,
 )
+from dorgy.cli.helpers.search import _load_embedding_function
+from dorgy.cli.helpers.state import (
+    _apply_state_changes,
+    _detect_collection_root,
+    _normalise_state_key,
+    _plan_state_changes,
+    _resolve_move_destination,
+    relative_to_collection,
+)
+from dorgy.cli.lazy import _load_dependency
 from dorgy.config import ConfigError, ConfigManager
 
 if TYPE_CHECKING:
@@ -70,8 +71,6 @@ def mv(
     Raises:
         click.ClickException: When validation fails before executing the move.
     """
-
-    from dorgy.cli_support import relative_to_collection
 
     OperationExecutor = _load_dependency(
         "OperationExecutor", "dorgy.organization.executor", "OperationExecutor"

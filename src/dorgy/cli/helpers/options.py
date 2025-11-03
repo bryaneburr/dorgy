@@ -1,11 +1,4 @@
-"""Reusable Click option factories and validation helpers for Dorgy CLI commands.
-
-This module centralizes common Click option patterns (quiet/summary/json, dry-run,
-output paths) and provides helpers for reconciling command-line flags with
-configuration defaults. Commands can import these decorators to avoid repeating
-option declarations and rely on :func:`resolve_mode_settings` to validate
-mutually exclusive combinations while honouring configuration fallbacks.
-"""
+"""Reusable Click option factories and validation helpers for CLI commands."""
 
 from __future__ import annotations
 
@@ -21,70 +14,35 @@ Callback = TypeVar("Callback", bound=Callable[..., Any])
 
 
 def json_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator enabling `--json` toggles.
-
-    Args:
-        help_text: Optional override for the help description.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator enabling `--json` toggles."""
 
     description = help_text or "Emit command output as JSON."
     return click.option("--json", "json_output", is_flag=True, help=description)
 
 
 def summary_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator enabling `--summary` toggles.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator enabling `--summary` toggles."""
 
     description = help_text or "Only emit summary lines."
     return click.option("--summary", "summary_mode", is_flag=True, help=description)
 
 
 def quiet_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator enabling `--quiet` toggles.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator enabling `--quiet` toggles."""
 
     description = help_text or "Suppress non-error output."
     return click.option("--quiet", is_flag=True, help=description)
 
 
 def dry_run_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator enabling `--dry-run` toggles.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator enabling `--dry-run` toggles."""
 
     description = help_text or "Preview the command without modifying files."
     return click.option("--dry-run", is_flag=True, help=description)
 
 
 def output_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return an option decorator for output directory overrides.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return an option decorator for output directory overrides."""
 
     description = help_text or "Directory for organized files."
     return click.option(
@@ -95,14 +53,7 @@ def output_option(help_text: str | None = None) -> Callable[[Callback], Callback
 
 
 def classify_prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for classification prompt overrides.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator for classification prompt overrides."""
 
     description = help_text or "Provide extra classification guidance."
     return click.option("--classify-prompt", type=str, help=description)
@@ -111,14 +62,7 @@ def classify_prompt_option(help_text: str | None = None) -> Callable[[Callback],
 def classify_prompt_file_option(
     help_text: str | None = None,
 ) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for classification prompt files.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator for classification prompt files."""
 
     description = help_text or "Read classification guidance from a text file."
     return click.option(
@@ -129,14 +73,7 @@ def classify_prompt_file_option(
 
 
 def structure_prompt_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for structure planning prompts.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator for structure planning prompts."""
 
     description = help_text or "Provide extra instructions for structure planning."
     return click.option("--structure-prompt", type=str, help=description)
@@ -145,14 +82,7 @@ def structure_prompt_option(help_text: str | None = None) -> Callable[[Callback]
 def structure_prompt_file_option(
     help_text: str | None = None,
 ) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for structure prompt files.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator for structure prompt files."""
 
     description = help_text or "Read structure planning instructions from a text file."
     return click.option(
@@ -163,14 +93,7 @@ def structure_prompt_file_option(
 
 
 def recursive_option(help_text: str | None = None) -> Callable[[Callback], Callback]:
-    """Return a Click option decorator for recursive behavior toggles.
-
-    Args:
-        help_text: Optional help text override.
-
-    Returns:
-        Callable[[Callback], Callback]: Decorator applying the option.
-    """
+    """Return a Click option decorator for recursive behavior toggles."""
 
     description = help_text or "Include subdirectories during processing."
     return click.option("-r", "--recursive", is_flag=True, help=description)
@@ -178,16 +101,7 @@ def recursive_option(help_text: str | None = None) -> Callable[[Callback], Callb
 
 @dataclass(frozen=True, slots=True)
 class ModeResolution:
-    """Resolved CLI presentation settings derived from flags and defaults.
-
-    Attributes:
-        quiet: Whether quiet mode should be active for the command.
-        summary: Whether summary-only mode should be active.
-        json_output: Whether JSON output is enabled.
-        explicit_quiet: Indicates if quiet mode was explicitly requested.
-        explicit_summary: Indicates if summary mode was explicitly requested.
-        explicit_json: Indicates if JSON mode was explicitly requested.
-    """
+    """Resolved CLI presentation settings derived from flags and defaults."""
 
     quiet: bool
     summary: bool

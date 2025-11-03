@@ -9,10 +9,7 @@ from click.core import ParameterSource
 
 from dorgy.cli.context import console
 from dorgy.cli.helpers.messages import _emit_message, _emit_watch_batch, _handle_cli_error
-from dorgy.cli.helpers.progress import _ProgressScope
-from dorgy.cli.helpers.search import _load_embedding_function
-from dorgy.cli.lazy import _load_dependency
-from dorgy.cli_options import (
+from dorgy.cli.helpers.options import (
     ModeResolution,
     classify_prompt_file_option,
     classify_prompt_option,
@@ -26,6 +23,10 @@ from dorgy.cli_options import (
     structure_prompt_option,
     summary_option,
 )
+from dorgy.cli.helpers.progress import _ProgressScope
+from dorgy.cli.helpers.prompts import resolve_prompt_text
+from dorgy.cli.helpers.search import _load_embedding_function
+from dorgy.cli.lazy import _load_dependency
 from dorgy.config import ConfigError, ConfigManager
 from dorgy.shutdown import ShutdownRequested
 
@@ -103,8 +104,6 @@ def watch(
     Raises:
         click.ClickException: When validation fails before launching the watch.
     """
-
-    from dorgy.cli_support import resolve_prompt_text
 
     WatchService = _load_dependency("WatchService", "dorgy.watch", "WatchService")
     LLMUnavailableError = _load_dependency(

@@ -13,17 +13,17 @@ from rich.table import Table
 from dorgy.cli.context import LOGGER, console
 from dorgy.cli.helpers.formatting import _format_modified_timestamp
 from dorgy.cli.helpers.messages import _emit_message, _format_summary_line, _handle_cli_error
-from dorgy.cli.helpers.parsing import _parse_csv_option, _parse_datetime_option
-from dorgy.cli.helpers.search import _load_embedding_function
-from dorgy.cli.helpers.state import _normalise_state_key
-from dorgy.cli.lazy import _load_dependency
-from dorgy.cli_options import (
+from dorgy.cli.helpers.options import (
     ModeResolution,
     json_option,
     quiet_option,
     resolve_mode_settings,
     summary_option,
 )
+from dorgy.cli.helpers.parsing import _parse_csv_option, _parse_datetime_option
+from dorgy.cli.helpers.search import _load_embedding_function
+from dorgy.cli.helpers.state import _normalise_state_key, relative_to_collection
+from dorgy.cli.lazy import _load_dependency
 from dorgy.config import ConfigError, ConfigManager
 
 if TYPE_CHECKING:
@@ -319,10 +319,6 @@ def search(
 
             search_entries: list[Any] = []
             skipped_previews = 0
-            relative_to_collection = _load_dependency(
-                "relative_to_collection", "dorgy.cli_support", "relative_to_collection"
-            )
-
             for descriptor in ingestion_result.processed:
                 relative = relative_to_collection(descriptor.path, root)
                 normalized = _normalise_state_key(relative)
