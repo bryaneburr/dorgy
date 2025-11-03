@@ -1,4 +1,4 @@
-name: Docs (Pages): Build on PR, Deploy on Main
+name: "Docs (Pages): Build on PR, Deploy on Main"
 
 on:
   push:
