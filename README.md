@@ -6,7 +6,7 @@
 
 ## Dorgy
 
-<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy.png" alt="dorgy logo" height="200">
+<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_white_transparent_background.png" alt="dorgy logo" height="200">
 
 AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries — all powered by portable per‑collection state.
 
