@@ -15,7 +15,7 @@
 ### 2. Search Text Extraction Pipeline
 - Confirm Docling previews already output flattened text; when available, capture markdown/plaintext variants (e.g., `export_to_markdown`) and attach normalized text to descriptors via a helper (sanitize control chars, enforce preview limit).
 - For non-text files use vision captions/descriptions (`metadata["vision_caption"]`, labels) so we always have meaningful content.
-- Centralize normalization in a helper (new module or `cli_support`) so both org and watch reuse identical search payloads; update ingestion tests to cover metadata additions.
+- Centralize normalization in a helper under `dorgy.cli.helpers` so both org and watch reuse identical search payloads; update ingestion tests to cover metadata additions.
 
 ### 3. Search Index Infrastructure (Per-Collection `.dorgy/chroma`)
 - Introduce `dorgy.search.index.SearchIndex` that wraps `chromadb.PersistentClient(path=<collection>/.dorgy/chroma)` using a threading lock for safety.

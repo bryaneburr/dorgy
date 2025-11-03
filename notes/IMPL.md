@@ -199,7 +199,7 @@
 ### Scope & Milestones
 1. **Command Baseline & Option Harmonization**
    - Audit existing command signatures; align short/long flags (`--json`, `--quiet`, `--summary`, `--dry-run`, `--output`) and ensure help text follows the shared conventions.
-   - Introduce a `dorgy.cli_options` module housing reusable Click option factories and validation helpers (mutually exclusive flags, path resolution, config fallbacks).
+  - Introduce reusable Click option helpers under `dorgy.cli.helpers.options` for validation (mutually exclusive flags, path resolution, config fallbacks).
    - Update command docstrings/help examples to reflect the standard flag set.
 
 2. **`dorgy search` Implementation**

@@ -4,7 +4,7 @@
 
 ## System Overview
 
-- Runtime is anchored by `main.py` and `src/dorgy/__main__.py`, which forward to `dorgy.cli.main`. The CLI is implemented with Click and loads heavy dependencies lazily so startup remains fast even on large environments.
+- Runtime is anchored by `main.py` and `src/dorgy/__main__.py`, which forward to `dorgy.cli.main`. The CLI now lives in the `src/dorgy/cli/` package: `app.py` wires the Click group, `commands/` houses per-command builders, `helpers/` centralize progress/output/state utilities, and `lazy.py` keeps heavy dependencies lazily loaded so startup remains fast.
 - Commands funnel through shared helpers that normalize quiet/summary/JSON modes, yielding identical human and machine-readable outputs across organization, watch, search, move, status, undo, and config operations.
 - Core workflows revolve around a pipeline that discovers candidate files, extracts metadata, classifies items with DSPy-backed or heuristic models, plans renames/moves, executes them safely, and records state for auditing and undo.
 - Persistent metadata and caches live in `.dorgy/` under each collection root, enabling reversible operations and incremental processing.
@@ -13,7 +13,7 @@
 
 ### CLI Entry & Command Dispatch
 
-`dorgy.cli` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, and the nested `config` group. The module maintains `_LAZY_ATTRS` alongside `__getattr__`/`_load_dependency` to import heavyweight modules (classification, ingestion, watch, organization, state) only when a command actually needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) funnels through helpers so adding new commands automatically benefits from consistent UX.
+`dorgy.cli.app` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, and the nested `config` group. Command implementations live in `dorgy.cli.commands.*`, while `_LAZY_ATTRS` plus `__getattr__`/`_load_dependency` in `dorgy.cli.lazy` defer heavyweight imports (classification, ingestion, watch, organization, state) until a command needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) flows through `dorgy.cli.helpers.*` so new commands automatically inherit consistent UX.
 
 ### Organization & Watch Pipeline
 
@@ -30,9 +30,9 @@
 
 ## Module Responsibilities
 
-### CLI Layer (`src/dorgy/cli.py`, `src/dorgy/__init__.py`, `main.py`)
+### CLI Layer (`src/dorgy/cli/`, `src/dorgy/__init__.py`, `main.py`)
 
-Implements command registration, lazy dependency loading, unified error handling, progress/output helpers, and graceful shutdown handling. `cli_options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. `cli_support.py` centralizes cross-command helpers: prompt resolution, classification orchestration (`run_classification`), decision/descriptor zipping, watch batch rendering, and summary computations. `dorgy.shutdown` installs SIGINT/SIGTERM handlers so Ctrl+C sets a shared event, allowing ingestion, classification, and watch loops to unwind quickly before the CLI exits with code 130.
+`app.py` defines the root Click group and registers per-command builders from `commands/`. Shared output, parsing, state, progress, classification, prompts, and search helpers live under `helpers/`, while `lazy.py` preserves the `_LAZY_ATTRS` map used by `__getattr__`/`_load_dependency` to defer heavyweight imports. `helpers/options.py` defines reusable Click options (quiet, summary, JSON, dry-run, recursive) and `ModeResolution`. Classification orchestration, snapshot/state helpers, and organization metrics live in `helpers/classification.py`, `helpers/state.py`, and `helpers/organization.py` respectively. `dorgy.shutdown` installs SIGINT/SIGTERM handlers so Ctrl+C sets a shared event, allowing ingestion, classification, and watch loops to unwind quickly before the CLI exits with code 130.
 
 ### Configuration (`src/dorgy/config/`)
 
@@ -60,8 +60,11 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ### CLI Support & Shared Utilities
 
-- `cli_support.py` &mdash; classification caching keys, descriptor-to-state conversions, summary builders, error payload assembly, and helper functions (`build_original_snapshot`, `descriptor_to_record`, `relative_to_collection`).
-- `cli_options.py` &mdash; consolidated Click option decorators so commands stay aligned with global UX.
+- `helpers/options.py` &mdash; consolidated Click option decorators so commands stay aligned with global UX defaults.
+- `helpers/classification.py` &mdash; classification caching keys, orchestration helpers, and descriptor/decision pairing utilities.
+- `helpers/state.py` &mdash; descriptor-to-state conversions, snapshot builders, relative path helpers, and move planning utilities.
+- `helpers/organization.py` &mdash; summary metrics and error payload aggregation used by org/watch flows.
+- `helpers/prompts.py` &mdash; prompt file resolution shared across commands.
 - `classification/vision.py` &mdash; integrates image captioning, caching captions in `.dorgy/vision.json` and respecting prompts forwarded from the CLI.
 
 ### Search Indexing (`src/dorgy/search/`)
@@ -88,7 +91,7 @@ Wraps DSPy programs and language model coordination. `engine.py` houses `Classif
 
 ## Extensibility Notes
 
-1. New CLI commands should import heavy collaborators lazily and reuse `cli_options` decorators plus `cli_support` output helpers to stay aligned with summary/quiet/JSON semantics.
+1. New CLI commands should import heavy collaborators lazily and reuse helpers from `helpers/options.py`, `helpers/messages.py`, and related modules to stay aligned with summary/quiet/JSON semantics.
 2. Pipeline extensions (detectors, metadata extraction, planners) should plug into existing interfaces so watch and organization runs automatically benefit.
 3. Any new automation entry point or third-party integration must document expectations in the relevant module `AGENTS.md` and update caches/state schema comments as needed.
 4. When enabling new model capabilities (e.g., additional captioning backends), ensure prompt forwarding, cache semantics, and `.dorgy` persistence remain consistent so downstream automation continues to operate.

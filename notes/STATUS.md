@@ -1,5 +1,11 @@
 # Status Log
 
+## 2025-11-10
+- Refactored the oversized `dorgy/cli.py` into a modular package (`cli/app.py`, `cli/commands/`, `cli/helpers/`, `cli/lazy.py`) while preserving lazy imports and shared UX behaviours across org/watch/search/mv/status/undo/config commands.
+- Added dedicated helper modules for progress, search, state, parsing, and output logic; refreshed docstrings to stay Google-style and keep quiet/summary/JSON handling consistent.
+- Documented the new layout in `ARCH.md`, marked SPEC Phase 6 complete, created `src/dorgy/cli/AGENTS.md`, and logged coordination expectations for future CLI work.
+- Next actions: run `uv run pre-commit run --all-files` to validate the refactor, expand CLI regression tests to cover the reorganized module boundaries, and monitor watch/search flows for any lazy-import regressions.
+
 ## 2025-11-08
 - Updated documentation after wrapping Phase 5.8: refreshed `SPEC.md` defaults/sample config, `.dorgy/` artifact list, and vision progress notes; adjusted `README.md` roadmap/upcoming work; and clarified architecture guidance around vision caches.
 - Confirmed Phase 5.8 is marked complete in tables and narrative sections; captured ongoing risks plus future image-only PDF OCR follow-up items.
@@ -180,7 +186,7 @@
 - Threaded organizer prompts into `StructurePlanner.propose`, updated CLI call sites, and extended coverage/AGENTS/ARCH guidance so structure recommendations respect user instructions.
 - Next actions: run `uv run pytest tests/test_structure_planner.py` and `uv run pre-commit run --files src/dorgy/classification/structure.py tests/test_structure_planner.py` before opening the PR.
 - Introduced `--classify-prompt`/`--structure-prompt` (plus file variants) on `org`/`watch`, split prompt plumbing across classification and structure planning, refreshed docs/tests, and kept JSON compatibility via legacy `context.prompt`.
-- Next actions: execute `uv run pre-commit run --files src/dorgy/cli.py src/dorgy/cli_support.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
+- Next actions: execute `uv run pre-commit run --files src/dorgy/cli/commands/org.py src/dorgy/watch/service.py tests/test_cli_org.py tests/test_cli_watch.py` and `uv run pytest tests/test_cli_org.py tests/test_cli_watch.py` before merging.
 
 ## 2025-11-06
 - Began Phase 7 implementation by extending `FileRecord` with persistent `document_id`s, adding `CollectionState.search` metadata, and teaching `StateRepository` to normalize timestamps/IDs plus persist `.dorgy/search.json`; backfilled IDs are saved automatically during load migrations.
