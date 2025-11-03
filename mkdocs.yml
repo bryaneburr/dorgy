@@ -3,6 +3,7 @@ site_url: https://bryaneburr.github.io/dorgy
 repo_url: https://github.com/bryaneburr/dorgy
 theme:
   name: shadcn
+  icon: heroicons:folder
 nav:
   - Overview: index.md
   - Getting Started:

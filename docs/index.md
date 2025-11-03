@@ -1,5 +1,7 @@
 # Dorgy
 
+<img src="img/dorgy_logo_cropped.png" height="100" style="height: 100px"/>
+
 An AI‑assisted CLI that keeps growing collections of files tidy. Dorgy ingests, classifies, and organizes files on demand or continuously, preserves a reversible audit trail, and powers portable per‑collection semantic search.
 
 ## What You Can Do
