@@ -447,3 +447,33 @@ namespace = Collection(
     mypy,
     ci,
 )
+
+
+@task
+def docs_build(ctx: Context, strict: bool = True) -> None:
+    """Build the MkDocs site using uv and mkdocs-shadcn.
+
+    Args:
+        ctx: Invoke execution context.
+        strict: Fail on warnings when True.
+    """
+    args = ["run", "mkdocs", "build"]
+    if strict:
+        args.append("--strict")
+    _run_uv(ctx, args)
+
+
+@task
+def docs_serve(ctx: Context, host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Serve the MkDocs site locally.
+
+    Args:
+        ctx: Invoke execution context.
+        host: Host interface to bind.
+        port: Port to bind.
+    """
+    _run_uv(ctx, ["run", "mkdocs", "serve", "-a", f"{host}:{port}"])
+
+
+namespace.add_task(docs_build, "docs_build")
+namespace.add_task(docs_serve, "docs_serve")
