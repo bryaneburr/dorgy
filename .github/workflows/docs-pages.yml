@@ -1,10 +1,14 @@
-name: Deploy Docs to GitHub Pages
+name: Docs (Pages): Build on PR, Deploy on Main
 
 on:
   push:
     branches:
       - main
   pull_request:
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'images/**'
   workflow_dispatch:
 
 permissions:
