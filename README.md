@@ -3,14 +3,47 @@
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/dorgy)
 ![GitHub License](https://img.shields.io/github/license/bryaneburr/dorgy)
 
+<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_white_transparent_background.png" alt="dorgy logo" height="200" style="height: 200px">
 
-## Dorgy
-
-<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_white_transparent_background.png" alt="dorgy logo" height="200">
+# Dorgy
 
 AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries — all powered by portable per‑collection state.
 
----
+## What It Does
+
+Before (a messy folder):
+
+```
+my_docs/
+  IMG_0234.jpg
+  Scan_001.pdf
+  taxes.txt
+  contract_final_FINAL.docx
+  notes (1).txt
+  2023-05-07 14.23.10.png
+  invoice.pdf
+```
+
+After (organized by category/date with safe renames, hyphenated lower‑case folders):
+
+```
+my_docs/
+  .dorgy/                     # state, history, search index, logs
+  documents/
+    contracts/
+      Employment Agreement (2023-06-15).pdf
+    taxes/
+      2023/
+        Tax Notes.txt
+  photos/
+    2023/05/
+      2023-05-07 14-23-10.png
+  invoices/
+    2023/
+      ACME - April.pdf
+```
+
+Exact destinations depend on your config and prompts; all moves are reversible via `dorgy undo` using the state in `.dorgy`.
 
 ## Installation
 
@@ -33,8 +66,6 @@ uv sync --extra dev
 uv pip install -e .
 ```
 
----
-
 ## Getting Started
 
 ```bash
@@ -54,46 +85,6 @@ dorgy status ./documents --json
 ```
 
 See the docs for guides on Organize, Watch, Search, Move/Undo, and configuration details.
-
----
-
-## Before → After (What Dorgy Does)
-
-Before (a messy folder):
-
-```
-my_docs/
-  IMG_0234.jpg
-  Scan_001.pdf
-  taxes.txt
-  contract_final_FINAL.docx
-  notes (1).txt
-  2023-05-07 14.23.10.png
-  invoice.pdf
-```
-
-After (organized by category/date with safe renames):
-
-```
-my_docs/
-  .dorgy/                     # state, history, search index, logs
-  Documents/
-    Contracts/
-      Employment Agreement (2023-06-15).pdf
-    Taxes/
-      2023/
-        Tax Notes.txt
-  Photos/
-    2023/05/
-      2023-05-07 14-23-10.png
-  Invoices/
-    2023/
-      ACME - April.pdf
-```
-
-Exact destinations depend on your config and prompts; all moves are reversible via `.dorgy/`.
-
----
 
 ## Documentation
 
