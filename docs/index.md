@@ -21,6 +21,42 @@ dorgy watch ./inbox --json --once
 
 See Getting Started → Quickstart and Configuration for more.
 
+## Before → After
+
+Before (unorganized):
+
+```
+my_docs/
+  IMG_0234.jpg
+  Scan_001.pdf
+  taxes.txt
+  contract_final_FINAL.docx
+  notes (1).txt
+  2023-05-07 14.23.10.png
+  invoice.pdf
+```
+
+After (organized with categories and dates):
+
+```
+my_docs/
+  .dorgy/                     # state, history, search index, logs
+  Documents/
+    Contracts/
+      Employment Agreement (2023-06-15).pdf
+    Taxes/
+      2023/
+        Tax Notes.txt
+  Photos/
+    2023/05/
+      2023-05-07 14-23-10.png
+  Invoices/
+    2023/
+      ACME - April.pdf
+```
+
+Destinations vary by configuration and prompts. All changes are tracked in `.dorgy/` so you can undo.
+
 ## Features at a Glance
 
 - DSPy‑backed classification with heuristic fallbacks and vision captions (opt‑in by config).
