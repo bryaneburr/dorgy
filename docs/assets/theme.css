@@ -1,0 +1,11 @@
+/* Optional tweaks layered over mkdocs-shadcn */
+:root {
+  --radius: 10px;
+}
+
+.md-typeset .admonition,
+.md-typeset details,
+.md-typeset pre code {
+  border-radius: var(--radius);
+}
+

@@ -25,7 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
-urls = { Homepage = "https://github.com/bryaneburr/dorgy", "Bug Tracker" = "https://github.com/bryaneburr/dorgy/issues", Documentation = "https://github.com/bryaneburr/dorgy#readme" }
+urls = { Homepage = "https://github.com/bryaneburr/dorgy", "Bug Tracker" = "https://github.com/bryaneburr/dorgy/issues", Documentation = "https://bryaneburr.github.io/dorgy/" }
 dependencies = [
     "click>=8.0.0",
     "rich>=13.0.0",
@@ -52,6 +52,13 @@ dev = [
     "mypy>=1.9.0",
     "types-PyYAML>=6.0.12.20240917",
     "invoke>=2.2.0",
+]
+docs = [
+    "mkdocs>=1.5.3",
+    "mkdocs-shadcn>=0.1.6",
+    "mkdocstrings[python]>=0.24.0",
+    "mkdocs-click>=0.8.1",
+    "pymdown-extensions>=10.0",
 ]
 
 [project.scripts]

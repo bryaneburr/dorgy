@@ -1,0 +1,62 @@
+site_name: Dorgy
+site_url: https://bryaneburr.github.io/dorgy
+repo_url: https://github.com/bryaneburr/dorgy
+theme:
+  name: shadcn
+nav:
+  - Overview: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
+  - Guides:
+      - Organize: guides/organize.md
+      - Watch: guides/watch.md
+      - Search: guides/search.md
+      - Move & Undo: guides/move-undo-status.md
+      - Prompts & Vision: guides/prompts-vision.md
+      - Troubleshooting: guides/troubleshooting.md
+  - Reference:
+      - CLI: reference/cli.md
+      - API: reference/api.md
+      - Config: reference/config.md
+      - On-Disk Layout: reference/on-disk-layout.md
+      - State Models: reference/state-models.md
+      - JSON:
+          - Errors: reference/json/errors.md
+          - Watch Batch: reference/json/watch-batch.md
+          - Search Results: reference/json/search-results.md
+          - Move: reference/json/move.md
+  - Explanations:
+      - Architecture: explanations/architecture.md
+      - Design Choices: explanations/design-choices.md
+      - Search Architecture: explanations/search-architecture.md
+  - Development:
+      - Contributing: development/contributing.md
+      - Extending CLI: development/extending-cli.md
+      - Extending Pipeline: development/extending-pipeline.md
+      - Release: development/release.md
+      - CI: development/ci.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["src"]
+          options:
+            docstring_style: google
+            show_source: false
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - attr_list
+  - mkdocs-click
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - ..
+extra_css:
+  - assets/theme.css
