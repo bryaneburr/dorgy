@@ -96,6 +96,20 @@ See the docs for guides on Organize, Watch, Search, Move/Undo, and configuration
 
 We welcome issues and pull requests. See `docs/development/contributing.md` for environment setup, pre‑commit hooks, and CI guidance.
 
+### Local Workflow Helpers
+
+Durango ships with [Invoke](https://www.pyinvoke.org/) tasks that wrap our `uv` commands. After installing dependencies, run:
+
+```bash
+uv run invoke --list
+```
+
+Common tasks include:
+
+- `uv run invoke sync` — update the virtual environment (installs `dev` and `docs` extras by default).
+- `uv run invoke ci` — replicate the CI pipeline locally (lint, mypy, tests, docs).
+- `uv run invoke docs-serve` — launch the MkDocs server for live documentation previews.
+
 ## Authors
 
 - Codex (ChatGPT‑5 based agent) — primary implementation and tactical design.

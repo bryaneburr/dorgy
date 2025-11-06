@@ -1,6 +1,6 @@
 # AGENT DIRECTIVES
 
-- Use `uv` as the default Python environment manager for all development and CI tasks.
+- Use `uv` as the default Python environment manager for all development and CI tasks; prefer the Invoke helpers (`uv run invoke <task>`) added in `tasks.py` when running repeatable workflows.
 - Maintain feature branches for new work; merge to `main` only after linters and tests pass.
 - Keep AGENTS.md files up to date for every module that introduces non-trivial coordination expectations.
 - Configure and run pre-commit hooks before every push; hooks must format, lint, sort imports, and execute the Python test suite when source files change.
