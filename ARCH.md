@@ -17,7 +17,7 @@
 
 ### Organization & Watch Pipeline
 
-1. **Configuration resolution** &mdash; Durango's `ConfigManager` layers defaults, config files, YAML-parsed environment variables (`DORGY__*`), and CLI overrides normalized with `normalize_override_mapping`. CLI mode flags (quiet/summary/JSON) are normalized through `resolve_mode_settings`.
+1. **Configuration resolution** &mdash; Durango's `ConfigManager` layers defaults, config files, environment variables (`DORGY__*`), and CLI overrides normalized with `normalize_override_mapping`. CLI mode flags (quiet/summary/JSON) are normalized through `resolve_mode_settings`. Run `python scripts/generate_env_keys.py` to list canonical environment names derived from defaults.
 2. **Ingestion** &mdash; `IngestionPipeline` wires `DirectoryScanner`, `TypeDetector`, `HashComputer`, and `MetadataExtractor` (plus a `VisionCaptioner` when `processing.process_images` is enabled by default) to enumerate files, capture metadata/preview text (capped by the configurable `processing.preview_char_limit`, default 2048, and recorded as `preview_limit_characters`), compute hashes, and emit structured descriptors. Stage callbacks drive progress output.
 3. **Classification** &mdash; `ClassificationEngine` evaluates descriptors. When DSPy/models are available it invokes structured programs; otherwise it falls back to heuristics. Results are cached via `ClassificationCache`, and image captions use `VisionCache`. Prompt overrides travel through CLI options or prompt files and flow into the structure planner so folder proposals respect the same guidance. Needs-review routing compares the returned confidence against `ambiguity.confidence_threshold` (default 0.60) so automation can triage low-certainty decisions.
 4. **Structure planning** &mdash; `StructurePlanner` suggests destination folders, while `OrganizerPlanner` turns classifications into `OperationPlan` instances containing renames, moves, metadata updates, and planner notes. Conflict strategies (`append_number`, `timestamp`, `skip`) are honored per config.
@@ -36,7 +36,7 @@
 
 ### Configuration (`src/dorgy/config/`)
 
-Configuration helpers under `dorgy.config` manage YAML files under `~/.dorgy/config.yaml`, ensuring files exist and layering precedence of defaults, disk overrides, environment variables, and CLI inputs via Durango. Models in `models.py` are Pydantic structures representing config sections (`cli`, `processing`, `organization`, `llm`). `resolver.py` flattens keys for environment variables and validates merged configs, while `exceptions.py` defines `ConfigError`.
+Configuration helpers under `dorgy.config` manage YAML files under `~/.dorgy/config.yaml`, ensuring files exist and layering precedence of defaults, disk overrides, environment variables, and CLI inputs via Durango. Models in `models.py` are Pydantic structures representing config sections (`cli`, `processing`, `organization`, `llm`). `resolver.py` now only normalizes CLI overrides before Durango processes them, while `exceptions.py` defines `ConfigError`.
 
 ### Ingestion (`src/dorgy/ingestion/`)
 

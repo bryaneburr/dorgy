@@ -223,7 +223,7 @@
 5. **Configuration & Defaults**
    - Expand config schema with CLI defaults relevant to Phase 6 (e.g., `cli.move_conflict_strategy`, `cli.search_default_limit`, `cli.progress_enabled`).
   - Update configuration precedence tests and README/SPEC documentation to describe new keys.
-   - Ensure `flatten_for_env` exposes new settings and CLI commands respect them via shared option factories.
+  - Ensure configuration environment guidance stays in sync with defaults when documenting new settings.
    - Introduce `processing.parallel_workers` so ingestion and classification can scale concurrency when providers and hardware allow.
 
 6. **Documentation & Coordination**

@@ -17,11 +17,11 @@ from durango.exceptions import (
 from durango.exceptions import (
     UnsupportedFormatError,
 )
-from durango.sources.file import FileSourceConfig, ensure_config_file, load_config_file
+from durango.sources.file import FileSourceConfig, load_config_file
 
 from .exceptions import ConfigError
 from .models import DorgyConfig
-from .resolver import flatten_for_env, normalize_override_mapping, resolve_with_precedence
+from .resolver import normalize_override_mapping, resolve_with_precedence
 
 CONFIG_IDENTIFIER = "DORGY"
 DEFAULT_CONFIG_PATH = Path("~/.dorgy/config.yaml")
@@ -85,8 +85,12 @@ def ensure_config(config_path: Path | None = None) -> Path:
     """Create the configuration file with defaults if it does not exist."""
 
     resolved = _resolve_path(config_path)
-    file_config = FileSourceConfig(default_path=resolved)
-    ensure_config_file(resolved, config=file_config, data=DorgyConfig().model_dump())
+    if resolved.exists():
+        return resolved
+
+    manager = create_manager(resolved)
+    # Leverage Durango to write defaults by triggering the initial load.
+    manager.load(environ={})
     return resolved
 
 
@@ -152,7 +156,6 @@ __all__ = [
     "DorgyConfig",
     "create_manager",
     "ensure_config",
-    "flatten_for_env",
     "load_config",
     "load_file_overrides",
     "normalize_override_mapping",

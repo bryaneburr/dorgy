@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping as MappingABC
-from typing import Any, Dict, Mapping
+from typing import Any, Mapping
 
-import yaml
 from durango.sources.user import deep_merge_dicts
 from pydantic import ValidationError
 
@@ -51,37 +50,6 @@ def resolve_with_precedence(
         return DorgyConfig.model_validate(merged)
     except ValidationError as exc:
         raise ConfigError(f"Invalid configuration values: {exc}") from exc
-
-
-def flatten_for_env(config: DorgyConfig) -> Dict[str, str]:
-    """Render configuration into `DORGY__SECTION__KEY` environment variables.
-
-    Args:
-        config: The configuration model to flatten.
-
-    Returns:
-        Dict[str, str]: Mapping of environment variable names to serialized values.
-    """
-    flat: Dict[str, str] = {}
-    data = config.model_dump(mode="python")
-
-    def _recurse(prefix: list[str], value: Any) -> None:
-        """Populate the flattened mapping for a nested value."""
-        if isinstance(value, dict):
-            for key, child in value.items():
-                _recurse(prefix + [str(key)], child)
-        else:
-            env_key = "DORGY__" + "__".join(part.upper() for part in prefix)
-            if isinstance(value, (dict, list)):
-                rendered = yaml.safe_dump(value, default_flow_style=True).strip()
-            else:
-                rendered = "null" if value is None else str(value)
-            flat[env_key] = rendered
-
-    for top_key, child_value in data.items():
-        _recurse([str(top_key)], child_value)
-
-    return flat
 
 
 def normalize_override_mapping(source: Mapping[str, Any], *, source_name: str) -> dict[str, Any]:
@@ -144,4 +112,4 @@ def _assign(target: dict[str, Any], path: list[str], value: Any, *, source_name:
         node[leaf] = value
 
 
-__all__ = ["resolve_with_precedence", "flatten_for_env", "normalize_override_mapping"]
+__all__ = ["resolve_with_precedence", "normalize_override_mapping"]
