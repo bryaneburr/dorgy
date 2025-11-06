@@ -27,7 +27,7 @@ from dorgy.cli.helpers.progress import _ProgressScope
 from dorgy.cli.helpers.prompts import resolve_prompt_text
 from dorgy.cli.helpers.search import _load_embedding_function
 from dorgy.cli.lazy import _load_dependency
-from dorgy.config import ConfigError, ConfigManager
+from dorgy.config import ConfigError, ensure_config, load_config
 from dorgy.shutdown import ShutdownRequested
 
 
@@ -134,9 +134,8 @@ def watch(
         raise click.ClickException("--with-search cannot be combined with --without-search.")
 
     try:
-        manager = ConfigManager()
-        manager.ensure_exists()
-        config = manager.load()
+        ensure_config()
+        config = load_config()
     except ConfigError as exc:
         _handle_cli_error(str(exc), code="config_error", json_output=json_output)
         return

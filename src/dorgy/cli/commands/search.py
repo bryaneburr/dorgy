@@ -24,7 +24,7 @@ from dorgy.cli.helpers.parsing import _parse_csv_option, _parse_datetime_option
 from dorgy.cli.helpers.search import _load_embedding_function
 from dorgy.cli.helpers.state import _normalise_state_key, relative_to_collection
 from dorgy.cli.lazy import _load_dependency
-from dorgy.config import ConfigError, ConfigManager
+from dorgy.config import ConfigError, ensure_config, load_config
 
 if TYPE_CHECKING:
     from dorgy.state import FileRecord
@@ -134,9 +134,8 @@ def search(
 
     json_enabled = json_output
     try:
-        manager = ConfigManager()
-        manager.ensure_exists()
-        config = manager.load()
+        ensure_config()
+        config = load_config()
 
         if init_store and drop_store:
             raise click.ClickException("--init-store cannot be combined with --drop-store.")

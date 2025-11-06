@@ -10,7 +10,16 @@ from rich.syntax import Syntax
 
 from dorgy.cli.context import console
 from dorgy.cli.helpers.configuration import _assign_nested
-from dorgy.config import ConfigError, ConfigManager, DorgyConfig, resolve_with_precedence
+from dorgy.config import (
+    ConfigError,
+    DorgyConfig,
+    ensure_config,
+    load_config,
+    load_file_overrides,
+    read_config_text,
+    resolve_with_precedence,
+    save_config,
+)
 
 
 @click.group()
@@ -29,10 +38,9 @@ def config_view(no_env: bool) -> None:
     Raises:
         click.ClickException: If the configuration cannot be loaded.
     """
-    manager = ConfigManager()
     try:
-        manager.ensure_exists()
-        config = manager.load(include_env=not no_env)
+        ensure_config()
+        config = load_config(include_env=not no_env)
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -53,10 +61,9 @@ def config_set(key: str, value: str) -> None:
     Raises:
         click.ClickException: If the update fails validation or parsing.
     """
-    manager = ConfigManager()
-    manager.ensure_exists()
+    ensure_config()
 
-    before = manager.read_text().splitlines()
+    before = read_config_text().splitlines()
     segments = [segment.strip() for segment in key.split(".") if segment.strip()]
     if not segments:
         raise click.ClickException("KEY must specify a dotted path such as 'llm.temperature'.")
@@ -66,7 +73,7 @@ def config_set(key: str, value: str) -> None:
     except yaml.YAMLError as exc:
         raise click.ClickException(f"Unable to parse value: {exc}") from exc
 
-    file_data = manager.load_file_overrides()
+    file_data = load_file_overrides()
 
     try:
         _assign_nested(file_data, segments, parsed_value)
@@ -78,8 +85,8 @@ def config_set(key: str, value: str) -> None:
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    manager.save(file_data)
-    after = manager.read_text().splitlines()
+    save_config(file_data)
+    after = read_config_text().splitlines()
 
     diff = list(
         difflib.unified_diff(
@@ -107,10 +114,9 @@ def config_edit() -> None:
     Raises:
         click.ClickException: If the edited content fails validation.
     """
-    manager = ConfigManager()
-    manager.ensure_exists()
+    ensure_config()
 
-    original = manager.read_text()
+    original = read_config_text()
     edited = click.edit(original, extension=".yaml")
 
     if edited is None:
@@ -134,7 +140,7 @@ def config_edit() -> None:
     except ConfigError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    manager.save(parsed)
+    save_config(parsed)
     console.print("[green]Configuration updated successfully.[/green]")
 
 
