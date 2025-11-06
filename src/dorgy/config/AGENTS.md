@@ -1,6 +1,6 @@
 # CONFIG COORDINATION NOTES
 
-- Responsible for loading, validating, and persisting `~/.dorgy/config.yaml`; configuration helpers (`ensure_config`, `load_config`, `save_config`) delegate directly to `durango.ConfigManager`, so new fields must remain compatible with Durango's precedence rules (defaults → file → environment → overrides).
+- Responsible for loading, validating, and persisting `~/.dorgy/config.yaml`; configuration helpers (`ensure_config`, `load_config`, `save_config`) delegate directly to [`durango.ConfigManager`](https://github.com/bryaneburr/durango-config), so new fields must remain compatible with Durango's precedence rules (defaults → file → environment → overrides).
 - Any module requiring configuration values should call `load_config(...)` instead of reading files directly; inject the helpers for testability when behaviour depends on configuration.
 - Durango parses environment variables via `DORGY__*` keys; our wrapper pre-processes values with YAML semantics so structured overrides (lists/dicts) continue to work. Preserve this behaviour when extending environment handling.
 - CLI and automation-supplied overrides must call `normalize_override_mapping` before handing data to the manager to keep dotted keys (`section.value`) interoperable with nested mappings.

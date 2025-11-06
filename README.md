@@ -86,11 +86,39 @@ dorgy status ./documents --json
 
 See the docs for guides on Organize, Watch, Search, Move/Undo, and configuration details.
 
+### Configuring LLM access
+
+Set language model credentials and defaults via `dorgy config` commands or the YAML file at `~/.dorgy/config.yaml`. Important fields include:
+
+- `llm.model` — full LiteLLM/DSPy model identifier (e.g., `openai/gpt-4o-mini`, `openrouter/gpt-4.1`).
+- `llm.api_key` — API token for the selected provider (keep this in environment variables for security, e.g., `export DORGY__LLM__API_KEY=...`).
+- `llm.api_base_url` — optional custom gateway URL (useful for openrouter, proxies, or self-hosted backends).
+- `llm.temperature` / `llm.max_tokens` — sampling parameters that shape response creativity and length.
+
+To override values temporarily, export environment variables following the `DORGY__SECTION__KEY` scheme—for example:
+
+```bash
+export DORGY__LLM__MODEL="openai/gpt-4o-mini"
+export DORGY__LLM__API_KEY="sk-example"
+export DORGY__LLM__API_BASE_URL="https://api.openai.com/v1"
+```
+
+Then run CLI commands as usual (`dorgy org`, `dorgy watch`, etc.).
+
+### LLM Recommendations
+
+We've tested `dorgy` with a number of LLMs and providers, and we've found the following to perform well:
+- GPT-5
+- Gemini 2.5
+- If you use [OpenRouter](https://openrouter.ai), the `openrouter/auto` model is an interesting choice.
+
 ## Documentation
 
 - Published site: https://bryaneburr.github.io/dorgy/
 - Source: `docs/` (MkDocs + shadcn)
 - Start with Getting Started → Quickstart and Configuration.
+- Configuration management is powered by [Durango](https://github.com/bryaneburr/durango-config); see the Configuration guide for precedence details.
+
 
 ## Contributing
 
@@ -98,7 +126,7 @@ We welcome issues and pull requests. See `docs/development/contributing.md` for 
 
 ### Local Workflow Helpers
 
-Durango ships with [Invoke](https://www.pyinvoke.org/) tasks that wrap our `uv` commands. After installing dependencies, run:
+This repository includes [Invoke](https://www.pyinvoke.org/) tasks that wrap our `uv` commands. After installing dependencies, run:
 
 ```bash
 uv run invoke --list
@@ -109,11 +137,6 @@ Common tasks include:
 - `uv run invoke sync` — update the virtual environment (installs `dev` and `docs` extras by default).
 - `uv run invoke ci` — replicate the CI pipeline locally (lint, mypy, tests, docs).
 - `uv run invoke docs-serve` — launch the MkDocs server for live documentation previews.
-
-## Authors
-
-- Codex (ChatGPT‑5 based agent) — primary implementation and tactical design.
-- Bryan E. Burr ([@bryaneburr](https://github.com/bryaneburr)) — supervisor, editor, and maintainer.
 
 ## License
 
