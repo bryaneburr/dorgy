@@ -27,7 +27,7 @@ from dorgy.cli.helpers.state import (
     relative_to_collection,
 )
 from dorgy.cli.lazy import _load_dependency
-from dorgy.config import ConfigError, ConfigManager
+from dorgy.config import ConfigError, ensure_config, load_config
 
 if TYPE_CHECKING:
     from dorgy.state import OperationEvent
@@ -87,9 +87,8 @@ def mv(
 
     json_enabled = json_output
     try:
-        manager = ConfigManager()
-        manager.ensure_exists()
-        config = manager.load()
+        ensure_config()
+        config = load_config()
 
         mode: ModeResolution = resolve_mode_settings(
             ctx,

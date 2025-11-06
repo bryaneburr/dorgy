@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping as MappingABC
-from copy import deepcopy
 from typing import Any, Dict, Mapping
 
 import yaml
+from durango.sources.user import deep_merge_dicts
 from pydantic import ValidationError
 
 from .exceptions import ConfigError
@@ -36,7 +36,7 @@ def resolve_with_precedence(
     """
     baseline = defaults.model_dump(mode="python")
 
-    merged = deepcopy(baseline)
+    merged = dict(baseline)
     for name, source in (
         ("file", file_overrides),
         ("environment", env_overrides),
@@ -44,8 +44,8 @@ def resolve_with_precedence(
     ):
         if source is None:
             continue
-        overrides = _normalize_mapping(source, source_name=name)
-        merged = _deep_merge(merged, overrides)
+        overrides = normalize_override_mapping(source, source_name=name)
+        merged = deep_merge_dicts(merged, overrides)
 
     try:
         return DorgyConfig.model_validate(merged)
@@ -84,7 +84,7 @@ def flatten_for_env(config: DorgyConfig) -> Dict[str, str]:
     return flat
 
 
-def _normalize_mapping(source: Mapping[str, Any], *, source_name: str) -> dict[str, Any]:
+def normalize_override_mapping(source: Mapping[str, Any], *, source_name: str) -> dict[str, Any]:
     """Normalize overrides expressed through dotted keys into nested mappings.
 
     Args:
@@ -135,34 +135,13 @@ def _assign(target: dict[str, Any], path: list[str], value: Any, *, source_name:
         node = existing
     leaf = path[-1]
     if isinstance(value, MappingABC):
-        nested = _normalize_mapping(value, source_name=source_name)
+        nested = normalize_override_mapping(value, source_name=source_name)
         existing_leaf = node.get(leaf, {})
         if not isinstance(existing_leaf, MappingABC):
             existing_leaf = {}
-        node[leaf] = _deep_merge(existing_leaf, nested)
+        node[leaf] = deep_merge_dicts(existing_leaf, nested)
     else:
         node[leaf] = value
 
 
-def _deep_merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
-    """Recursively merge override mappings into a base mapping.
-
-    Args:
-        base: Original mapping to merge on top of.
-        overrides: Mapping providing replacement or nested values.
-
-    Returns:
-        dict[str, Any]: New mapping with overrides applied.
-    """
-    merged: dict[str, Any] = {}
-    for key, value in base.items():
-        merged[key] = deepcopy(value)
-    for key, value in overrides.items():
-        if isinstance(value, MappingABC) and isinstance(merged.get(key), MappingABC):
-            merged[key] = _deep_merge(dict(merged[key]), value)  # type: ignore[arg-type]
-        else:
-            merged[key] = deepcopy(value)
-    return merged
-
-
-__all__ = ["resolve_with_precedence", "flatten_for_env"]
+__all__ = ["resolve_with_precedence", "flatten_for_env", "normalize_override_mapping"]

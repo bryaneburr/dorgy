@@ -6,25 +6,13 @@ import pytest
 
 from dorgy.config import (
     ConfigError,
-    ConfigManager,
     DorgyConfig,
+    ensure_config,
     flatten_for_env,
+    load_config,
     resolve_with_precedence,
+    save_config,
 )
-
-
-def _fresh_manager(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigManager:
-    """Return a ConfigManager rooted under a temporary HOME.
-
-    Args:
-        tmp_path: Temporary directory provided by pytest.
-        monkeypatch: Pytest monkeypatch fixture for environment variables.
-
-    Returns:
-        ConfigManager: Manager instance bound to the temporary location.
-    """
-    monkeypatch.setenv("HOME", str(tmp_path))
-    return ConfigManager()
 
 
 def test_ensure_exists_creates_default_file(
@@ -36,16 +24,15 @@ def test_ensure_exists_creates_default_file(
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Pytest monkeypatch fixture for environment variables.
     """
-    manager = _fresh_manager(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
 
-    path = manager.ensure_exists()
+    path = ensure_config()
 
     assert path.exists()
     text = path.read_text(encoding="utf-8")
-    assert "Dorgy configuration file" in text
-    assert "Last updated:" in text
+    assert "llm:" in text
 
-    config = manager.load(include_env=False)
+    config = load_config(include_env=False)
     assert isinstance(config, DorgyConfig)
 
 
@@ -58,10 +45,10 @@ def test_resolve_with_precedence_respects_order(
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Pytest monkeypatch fixture for environment variables.
     """
-    manager = _fresh_manager(tmp_path, monkeypatch)
-    manager.ensure_exists()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ensure_config()
 
-    manager.save({"llm": {"model": "gpt-4"}, "processing": {"max_file_size_mb": 64}})
+    save_config({"llm": {"model": "gpt-4"}, "processing": {"max_file_size_mb": 64}})
 
     env = {"DORGY__LLM__TEMPERATURE": "0.7"}
     cli_overrides = {
@@ -69,13 +56,29 @@ def test_resolve_with_precedence_respects_order(
         "cli.quiet_default": True,
     }
 
-    config = manager.load(cli_overrides=cli_overrides, env_overrides=env)
+    config = load_config(cli_overrides=cli_overrides, env_overrides=env)
 
     assert config.llm.model == "gpt-4"
     assert config.processing.max_file_size_mb == 64
     # CLI overrides take precedence over environment
     assert config.llm.temperature == pytest.approx(0.2)
     assert config.cli.quiet_default is True
+
+
+def test_environment_values_support_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure environment overrides accept structured YAML payloads."""
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ensure_config()
+
+    env = {
+        "DORGY__RULES": "[{'pattern': '.*', 'destination': 'outbox'}]",
+        "DORGY__PROCESSING__LOCKED_FILES": "{'retry_attempts': 5}",
+    }
+    config = load_config(env_overrides=env)
+
+    assert config.rules == [{"pattern": ".*", "destination": "outbox"}]
+    assert config.processing.locked_files.retry_attempts == 5
 
 
 def test_invalid_yaml_raises_config_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,13 +88,13 @@ def test_invalid_yaml_raises_config_error(tmp_path: Path, monkeypatch: pytest.Mo
         tmp_path: Temporary directory provided by pytest.
         monkeypatch: Pytest monkeypatch fixture for environment variables.
     """
-    manager = _fresh_manager(tmp_path, monkeypatch)
-    manager.ensure_exists()
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = ensure_config()
 
-    manager.config_path.write_text("- not-a-mapping", encoding="utf-8")
+    path.write_text("- not-a-mapping", encoding="utf-8")
 
     with pytest.raises(ConfigError):
-        manager.load()
+        load_config()
 
 
 def test_flatten_for_env_round_trips_defaults() -> None:
