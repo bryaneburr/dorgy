@@ -5,9 +5,19 @@
 
 # Dorgy
 
-<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_cropped.png" alt="dorgy logo" height="150" style="height: 150px">
+<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_cropped.png" alt="dorgy logo" height="150" style="height: 150px" />
 
-AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries — all powered by portable per‑collection state.
+
+AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries - all powered by portable per‑collection state.
+
+
+Read the documentation: [https://bryaneburr.github.io/dorgy/](https://bryaneburr.github.io/dorgy/)
+
+### Powered by:
+- [DSPy](https://github.com/stanfordnlp/dspy) - Structured LLM queries and responses
+- [Docling](https://github.com/docling-project/docling) - Document processing
+- [ChromaDB](https://github.com/chroma-core/chroma) - Document search
+- [Durango](https://github.com/bryaneburr/durango-config) - CLI Configuration management
 
 ## What It Does
 
@@ -108,16 +118,10 @@ Then run CLI commands as usual (`dorgy org`, `dorgy watch`, etc.).
 ### LLM Recommendations
 
 We've tested `dorgy` with a number of LLMs and providers, and we've found the following to perform well:
+- Gemini 2.5 (Best)
+- Claude Sonnet 4.5
 - GPT-5
-- Gemini 2.5
-- If you use [OpenRouter](https://openrouter.ai), the `openrouter/auto` model is an interesting choice.
-
-## Documentation
-
-- Published site: https://bryaneburr.github.io/dorgy/
-- Source: `docs/` (MkDocs + shadcn)
-- Start with Getting Started → Quickstart and Configuration.
-- Configuration management is powered by [Durango](https://github.com/bryaneburr/durango-config); see the Configuration guide for precedence details.
+- If you use [OpenRouter](https://openrouter.ai), the `openrouter/auto` model can give interesting results.
 
 
 ## Contributing
