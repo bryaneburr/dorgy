@@ -154,6 +154,9 @@ class OrganizationOptions(DorgyBaseModel):
         preserve_timestamps: Whether to retain original timestamps.
         preserve_extended_attributes: Whether to retain extended attributes.
         rename_files: Whether to automatically rename files based on classification output.
+        structure_reprompt_enabled: Whether the structure planner should re-issue
+            LLM requests when responses omit files or only provide single-segment
+            destinations.
     """
 
     conflict_resolution: Literal["append_number", "timestamp", "skip"] = Field(
@@ -165,6 +168,7 @@ class OrganizationOptions(DorgyBaseModel):
     preserve_timestamps: bool = True
     preserve_extended_attributes: bool = True
     rename_files: bool = False
+    structure_reprompt_enabled: bool = True
 
 
 class AmbiguitySettings(DorgyBaseModel):

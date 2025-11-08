@@ -405,7 +405,10 @@ def org(
                 )
             if descriptor_list:
                 try:
-                    structure_planner = StructurePlannerCls(config.llm)
+                    structure_planner = StructurePlannerCls(
+                        config.llm,
+                        enable_reprompt=config.organization.structure_reprompt_enabled,
+                    )
                     structure_map = structure_planner.propose(
                         descriptor_list,
                         decision_list,

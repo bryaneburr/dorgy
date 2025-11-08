@@ -66,7 +66,12 @@ class FileTreeSignature(dspy.Signature):  # type: ignore[misc]
 class StructurePlanner:
     """Use an LLM to propose a nested destination tree for descriptors."""
 
-    def __init__(self, settings: Optional[LLMSettings] = None) -> None:
+    def __init__(
+        self,
+        settings: Optional[LLMSettings] = None,
+        *,
+        enable_reprompt: bool = True,
+    ) -> None:
         legacy_flag = os.getenv("DORGY_USE_FALLBACK")
         if legacy_flag is not None:
             LOGGER.warning(
@@ -76,6 +81,7 @@ class StructurePlanner:
         use_fallback = os.getenv("DORGY_USE_FALLBACKS") == "1"
         self._settings = settings or LLMSettings()
         self._use_fallback = use_fallback
+        self._allow_reprompt = enable_reprompt
         self._enabled = False
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
 
@@ -200,12 +206,13 @@ class StructurePlanner:
         summary = self._build_descriptor_summary(descriptor_list, decision_list, source_root)
 
         attempts = 0
+        max_attempts = 2 if self._allow_reprompt else 1
         reminder_prompt: Optional[str] = None
         mapping: Dict[Path, Path] = {}
         missing_sources: List[Path] = []
         shallow_sources: List[Tuple[Path, Path]] = []
 
-        while attempts < 2:
+        while attempts < max_attempts:
             attempts += 1
             effective_prompt = self._merge_prompts(prompt, reminder_prompt)
             goal = self._compose_goal_prompt(summary, effective_prompt)

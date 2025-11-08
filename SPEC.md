@@ -157,6 +157,7 @@ organization:
   preserve_timestamps: true
   preserve_extended_attributes: true
   rename_files: false
+  structure_reprompt_enabled: true
 
 # Ambiguity Handling
 ambiguity:

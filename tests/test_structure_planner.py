@@ -88,6 +88,7 @@ def test_structure_planner_propose_raises_on_empty_response(monkeypatch) -> None
     planner._settings = LLMSettings()
     planner._use_fallback = False
     planner._enabled = True
+    planner._allow_reprompt = True
 
     class _Stub:
         def __call__(self, **_: object) -> object:
@@ -127,6 +128,7 @@ def test_structure_planner_appends_prompt_to_goal() -> None:
     planner._settings = LLMSettings()
     planner._use_fallback = False
     planner._enabled = True
+    planner._allow_reprompt = True
     planner._program = _CaptureProgram()  # type: ignore[attr-defined]
 
     result = planner.propose(
@@ -195,6 +197,7 @@ def test_propose_normalizes_single_segment_destination(tmp_path: Path) -> None:
     planner._use_fallback = False
     planner._enabled = True
     planner._program = _Stub()  # type: ignore[attr-defined]
+    planner._allow_reprompt = True
 
     result = planner.propose([descriptor], [None], source_root=tmp_path)
 
@@ -231,8 +234,94 @@ def test_propose_assigns_fallback_for_missing_files(tmp_path: Path) -> None:
     planner._use_fallback = False
     planner._enabled = True
     planner._program = _PartialStub()  # type: ignore[attr-defined]
+    planner._allow_reprompt = True
 
     result = planner.propose([descriptor_a, descriptor_b], [None, None], source_root=tmp_path)
 
     assert result[descriptor_a.path] == Path("Projects/Taxes/a.pdf")
     assert result[descriptor_b.path] == Path("misc/b.pdf")
+
+
+def test_propose_skips_reprompt_when_disabled(tmp_path: Path) -> None:
+    descriptor_a = FileDescriptor(
+        path=tmp_path / "a.pdf",
+        display_name="a.pdf",
+        mime_type="application/pdf",
+    )
+    descriptor_b = FileDescriptor(
+        path=tmp_path / "b.pdf",
+        display_name="b.pdf",
+        mime_type="application/pdf",
+    )
+
+    response_payload = {
+        "files": [
+            {
+                "source": "a.pdf",
+                "destination": "Projects/Taxes/a.pdf",
+            }
+        ]
+    }
+
+    class _CountingStub:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, **_: object) -> object:
+            self.calls += 1
+            return type("Resp", (), {"tree_json": json.dumps(response_payload)})()
+
+    stub = _CountingStub()
+    planner = object.__new__(StructurePlanner)
+    planner._settings = LLMSettings()
+    planner._use_fallback = False
+    planner._enabled = True
+    planner._allow_reprompt = False
+    planner._program = stub  # type: ignore[attr-defined]
+
+    result = planner.propose([descriptor_a, descriptor_b], [None, None], source_root=tmp_path)
+
+    assert stub.calls == 1
+    assert result[descriptor_b.path] == Path("misc/b.pdf")
+
+
+def test_propose_reprompts_when_enabled(tmp_path: Path) -> None:
+    descriptor_a = FileDescriptor(
+        path=tmp_path / "a.pdf",
+        display_name="a.pdf",
+        mime_type="application/pdf",
+    )
+    descriptor_b = FileDescriptor(
+        path=tmp_path / "b.pdf",
+        display_name="b.pdf",
+        mime_type="application/pdf",
+    )
+
+    response_payload = {
+        "files": [
+            {
+                "source": "a.pdf",
+                "destination": "Projects/Taxes/a.pdf",
+            }
+        ]
+    }
+
+    class _CountingStub:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, **_: object) -> object:
+            self.calls += 1
+            return type("Resp", (), {"tree_json": json.dumps(response_payload)})()
+
+    stub = _CountingStub()
+    planner = object.__new__(StructurePlanner)
+    planner._settings = LLMSettings()
+    planner._use_fallback = False
+    planner._enabled = True
+    planner._allow_reprompt = True
+    planner._program = stub  # type: ignore[attr-defined]
+
+    planner.propose([descriptor_a, descriptor_b], [None, None], source_root=tmp_path)
+
+    assert stub.calls == 2
