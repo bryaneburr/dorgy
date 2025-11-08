@@ -1,5 +1,11 @@
 # Status Log
 
+## 2025-11-06
+- Installed the new `durango` dependency with `uv add` and replaced the bespoke configuration layer with direct Durango usage (`ensure_config`, `load_config`, `save_config`) while keeping CLI/env/file precedence intact.
+- Updated `dorgy.config.models` to inherit from `DurangoSettings`, retained YAML parsing for `DORGY__*` environment variables, and introduced `normalize_override_mapping` so CLI overrides (dotted keys) compose cleanly with nested mappings.
+- Refreshed config coordination notes (`src/dorgy/config/AGENTS.md`), architecture docs, and added regression tests covering structured environment overrides.
+- Next actions: run `uv run pre-commit run --all-files`, audit remaining modules for direct config file reads, and monitor watch/search flows for any new Durango-specific edge cases.
+
 ## 2025-11-10
 - Refactored the oversized `dorgy/cli.py` into a modular package (`cli/app.py`, `cli/commands/`, `cli/helpers/`, `cli/lazy.py`) while preserving lazy imports and shared UX behaviours across org/watch/search/mv/status/undo/config commands.
 - Added dedicated helper modules for progress, search, state, parsing, and output logic; refreshed docstrings to stay Google-style and keep quiet/summary/JSON handling consistent.

@@ -45,7 +45,7 @@ from dorgy.cli.helpers.state import (
     relative_to_collection,
 )
 from dorgy.cli.lazy import _load_dependency
-from dorgy.config import ConfigError, ConfigManager
+from dorgy.config import ConfigError, ensure_config, load_config
 from dorgy.shutdown import ShutdownRequested
 
 if TYPE_CHECKING:
@@ -180,9 +180,8 @@ def org(
     if with_search and without_search:
         raise click.ClickException("--with-search cannot be combined with --without-search.")
     try:
-        manager = ConfigManager()
-        manager.ensure_exists()
-        config = manager.load()
+        ensure_config()
+        config = load_config()
 
         mode = resolve_mode_settings(
             ctx,

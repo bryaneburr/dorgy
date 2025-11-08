@@ -21,7 +21,7 @@ from dorgy.cli.helpers.options import (
     summary_option,
 )
 from dorgy.cli.lazy import _load_dependency
-from dorgy.config import ConfigError, ConfigManager
+from dorgy.config import ConfigError, ensure_config, load_config
 
 if TYPE_CHECKING:
     from dorgy.state import OperationEvent
@@ -69,9 +69,8 @@ def status(
 
     json_enabled = json_output
     try:
-        manager = ConfigManager()
-        manager.ensure_exists()
-        config = manager.load()
+        ensure_config()
+        config = load_config()
 
         explicit_history = ctx.get_parameter_source("history_limit") == ParameterSource.COMMANDLINE
 

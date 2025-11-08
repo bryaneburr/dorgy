@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from durango import DurangoSettings
+from pydantic import AliasChoices, Field
 
 
-class DorgyBaseModel(BaseModel):
-    """Shared configuration for Dorgy Pydantic models."""
-
-    model_config = ConfigDict(extra="forbid")
+class DorgyBaseModel(DurangoSettings):
+    """Shared configuration for Dorgy settings models used with Durango."""
 
 
 class LLMSettings(DorgyBaseModel):

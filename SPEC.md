@@ -351,7 +351,7 @@ The project will progress through the following phases. Update the status column
 - `dorgy config edit` opens the file in `$EDITOR` (fallback to `vi`) and validates the result before saving; rollback if validation fails.
 
 ### Deliverables
-- Concrete implementations for `ConfigManager.load/save/ensure_exists`.
+- Concrete implementations for configuration helpers (`ensure_config`, `load_config`, `save_config`).
 - Utility for resolving settings with precedence (exposed via `dorgy.config.resolver` helper).
 - Tests covering environment overrides, file persistence, and CLI command flows (using Click's `CliRunner`).
 - Documentation updates in `README.md` and `AGENTS.md` describing configuration usage and automation hooks for the new behavior.

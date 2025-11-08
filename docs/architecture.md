@@ -17,7 +17,7 @@
 
 ### Organization & Watch Pipeline
 
-1. **Configuration resolution** &mdash; `ConfigManager` loads defaults, file overrides, environment variables (`DORGY__*`), and CLI overrides via `resolve_with_precedence`. CLI mode flags (quiet/summary/JSON) are normalized through `resolve_mode_settings`.
+1. **Configuration resolution** &mdash; [Durango's `ConfigManager`](https://github.com/bryaneburr/durango-config) layers defaults, config files, environment variables (`DORGY__*`), and CLI overrides normalized with `normalize_override_mapping`. CLI mode flags (quiet/summary/JSON) are normalized through `resolve_mode_settings`. Run `python scripts/generate_env_keys.py` to inspect canonical environment names mapped from the defaults.
 2. **Ingestion** &mdash; `IngestionPipeline` wires `DirectoryScanner`, `TypeDetector`, `HashComputer`, and `MetadataExtractor` (plus a `VisionCaptioner` when `processing.process_images` is enabled by default) to enumerate files, capture metadata/preview text (capped by the configurable `processing.preview_char_limit`, default 2048, and recorded as `preview_limit_characters`), compute hashes, and emit structured descriptors. Stage callbacks drive progress output.
 3. **Classification** &mdash; `ClassificationEngine` evaluates descriptors. When DSPy/models are available it invokes structured programs; otherwise it falls back to heuristics. Results are cached via `ClassificationCache`, and image captions use `VisionCache`. Prompt overrides travel through CLI options or prompt files and flow into the structure planner so folder proposals respect the same guidance. Needs-review routing compares the returned confidence against `ambiguity.confidence_threshold` (default 0.60) so automation can triage low-certainty decisions.
 4. **Structure planning** &mdash; `StructurePlanner` now prepends descriptor summaries (counts, category tallies, existing folder hints, duplicate stems) to the LLM prompt, enforces per-file coverage, and re-prompts (configurable via `organization.structure_reprompt_enabled`) when files go missing or land in single-segment destinations. Any gaps fall back to normalized paths (`misc/<filename>` or `<folder>/<original file>`) before `OrganizerPlanner` converts the mapping into `OperationPlan` entries (renames, moves, metadata updates, planner notes) that respect conflict strategies (`append_number`, `timestamp`, `skip`).
@@ -36,7 +36,7 @@
 
 ### Configuration (`src/dorgy/config/`)
 
-`ConfigManager` manages YAML files under `~/.dorgy/config.yaml`, ensuring files exist and layering precedence of defaults, disk overrides, environment variables, and CLI inputs. Models in `models.py` are Pydantic structures representing config sections (`cli`, `processing`, `organization`, `llm`). `resolver.py` flattens keys for environment variables and validates merged configs, while `exceptions.py` defines `ConfigError`.
+Configuration helpers under `dorgy.config` manage YAML files under `~/.dorgy/config.yaml`, ensuring files exist and layering precedence of defaults, disk overrides, environment variables, and CLI inputs via Durango. Models in `models.py` are Pydantic structures representing config sections (`cli`, `processing`, `organization`, `llm`). `resolver.py` only normalizes CLI overrides before Durango processes them, while `exceptions.py` defines `ConfigError`.
 
 ### Ingestion (`src/dorgy/ingestion/`)
 

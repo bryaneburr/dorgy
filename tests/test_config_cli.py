@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from dorgy.cli import cli
-from dorgy.config import ConfigManager
+from dorgy.config import ensure_config, load_config
 
 
 def _env_with_home(tmp_path: Path) -> dict[str, Any]:
@@ -66,9 +66,8 @@ def test_config_set_updates_value_and_writes_diff(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "0.42" in result.output
 
-    manager = ConfigManager(config_path=_config_path(tmp_path))
-    manager.ensure_exists()
-    config = manager.load(include_env=False)
+    ensure_config(_config_path(tmp_path))
+    config = load_config(config_path=_config_path(tmp_path), include_env=False)
     assert config.llm.temperature == pytest.approx(0.42)
 
 
@@ -82,8 +81,7 @@ def test_config_edit_applies_changes(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     env = _env_with_home(tmp_path)
 
-    manager = ConfigManager(config_path=_config_path(tmp_path))
-    manager.ensure_exists()
+    ensure_config(_config_path(tmp_path))
 
     def _mock_edit(text: str, **_: Any) -> str:
         """Simulate a user editing the configuration file.
@@ -104,5 +102,5 @@ def test_config_edit_applies_changes(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "updated" in result.output.lower()
 
-    config = manager.load(include_env=False)
+    config = load_config(config_path=_config_path(tmp_path), include_env=False)
     assert config.llm.temperature == pytest.approx(0.55)

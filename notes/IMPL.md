@@ -36,7 +36,7 @@
 
 4. Configuration Integration
    - Allow CLI options (e.g., `--history`, `--quiet`, potential future defaults) to fall back to configuration or env variables.
-   - Document new config keys in `SPEC.md`/`README.md`, update `ConfigManager` tests if defaults change.
+  - Document new config keys in `SPEC.md`/`README.md`, update configuration helper tests if defaults change.
 
 5. Testing & Documentation
    - Expand CLI integration tests to cover new flags, quiet/summary modes, JSON error cases, and polished messaging.
@@ -224,8 +224,8 @@
 
 5. **Configuration & Defaults**
    - Expand config schema with CLI defaults relevant to Phase 6 (e.g., `cli.move_conflict_strategy`, `cli.search_default_limit`, `cli.progress_enabled`).
-   - Update `ConfigManager` precedence tests and README/SPEC documentation to describe new keys.
-   - Ensure `flatten_for_env` exposes new settings and CLI commands respect them via shared option factories.
+  - Update configuration precedence tests and README/SPEC documentation to describe new keys.
+  - Ensure configuration environment guidance stays in sync with defaults when documenting new settings.
    - Introduce `processing.parallel_workers` so ingestion and classification can scale concurrency when providers and hardware allow.
 
 6. **Documentation & Coordination**
