@@ -6,8 +6,9 @@ import json
 import logging
 import os
 import re
+from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 try:  # pragma: no cover - optional dependency
     import dspy  # type: ignore
@@ -23,17 +24,33 @@ from dorgy.ingestion.models import FileDescriptor
 LOGGER = logging.getLogger(__name__)
 
 _BASE_INSTRUCTIONS = (
-    "You are organising a user's personal documents. Produce a concise nested folder "
-    "structure that groups related files together. Prefer reusing a small number of "
-    "top-level folders and nest subfolders when appropriate. Generate JSON with the "
-    'shape {"files": [{"source": "<original relative path>", "destination": '
-    '"<relative destination path>"}]}. Do not include absolute paths or drive letters. '
-    "Destinations must keep the original filename extension exactly once. Use hyphenated "
-    "folder names and avoid extremely long directory chains. Prefer placing files inside "
-    "meaningful directories instead of leaving them at the root; create subfolders when it "
-    "helps keep related items together, and only leave a file at the top level if no "
-    "sensible grouping exists."
+    "You are organising a user's personal documents. Follow these rules exactly:\n"
+    '1. Generate JSON matching {"files": [{"source": "<relative path>", '
+    '"destination": "<relative path>"}]} and nothing else.\n'
+    "2. Propose a destination for every provided file exactly once. Do not invent files "
+    "or skip any entries.\n"
+    "3. Destinations must keep the original filename (including extension) and use at "
+    "least two path segments (e.g., 'Projects/Taxes/file.pdf').\n"
+    "4. Only place a file directly under the root when you intentionally use a "
+    "fallback folder named 'misc/<filename>'.\n"
+    "5. Prefer a small, meaningful set of top-level folders, add subfolders when it "
+    "improves grouping, and avoid chains deeper than four levels.\n"
+    "6. Reuse existing folder hints from the collection when sensible, keep names "
+    "concise with hyphens, and never include absolute paths or drive letters.\n"
+    "7. Whenever multiple files share a theme (same category, institution, project, or "
+    "year), create a top-level folder describing the theme and group files into nested "
+    "subfolders (e.g., 'Taxes/2024/1099/filename.pdf').\n"
+    "Example output format:\n"
+    "{\n"
+    '  "files": [\n'
+    '    {"source": "1099_2024.pdf", "destination": "Taxes/2024/Forms/1099_2024.pdf"},\n'
+    '    {"source": "project_alpha_update.pdf", "destination": '
+    '"Legal/Correspondence/Project-Alpha/project_alpha_update.pdf"}\n'
+    "  ]\n"
+    "}\n"
 )
+
+_FALLBACK_PARENT = Path("misc")
 
 _CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
@@ -179,53 +196,74 @@ class StructurePlanner:
                 )
             payload.append(entry)
 
-        try:
-            response = self._program(
-                files_json=json.dumps(payload, ensure_ascii=False),
-                goal=self._compose_goal_prompt(prompt),
-            )
-        except Exception as exc:  # pragma: no cover - defensive safeguard
-            LOGGER.debug("Structure planner request failed: %s", exc)
-            return {}
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        summary = self._build_descriptor_summary(descriptor_list, decision_list, source_root)
 
-        tree_json = getattr(response, "tree_json", "") if response else ""
-        if not tree_json:
-            LOGGER.debug("Structure planner returned empty tree response.")
-            raise LLMResponseError(
-                "Structure planner returned an empty response; enable DORGY_USE_FALLBACKS=1 to "
-                "continue with heuristic structure placement."
-            )
-
-        parsed = self._decode_tree_payload(tree_json)
-        if parsed is None:
-            snippet = tree_json if isinstance(tree_json, str) else repr(tree_json)
-            LOGGER.debug("Structure planner produced unparseable JSON: %s", snippet[:200])
-            raise LLMResponseError(
-                "Structure planner produced an invalid JSON payload. "
-                f"Partial response: {snippet[:160]!r}"
-            )
-
-        files = parsed.get("files")
-        if not isinstance(files, list):
-            LOGGER.debug("Structure planner response missing 'files' array.")
-            raise LLMResponseError(
-                "Structure planner response is missing the required 'files' array."
-            )
-
+        attempts = 0
+        reminder_prompt: Optional[str] = None
         mapping: Dict[Path, Path] = {}
-        for entry in files:
-            if not isinstance(entry, dict):
-                continue
-            source = entry.get("source")
-            destination = entry.get("destination")
-            if not isinstance(source, str) or not isinstance(destination, str):
-                continue
-            source_path = self._match_descriptor(source, descriptor_list, source_root)
-            if source_path is None:
-                continue
-            destination_path = Path(destination.strip().lstrip("/\\"))
-            if destination_path.parts:
-                mapping[source_path] = destination_path
+        missing_sources: List[Path] = []
+        shallow_sources: List[Tuple[Path, Path]] = []
+
+        while attempts < 2:
+            attempts += 1
+            effective_prompt = self._merge_prompts(prompt, reminder_prompt)
+            goal = self._compose_goal_prompt(summary, effective_prompt)
+            try:
+                response = self._program(files_json=payload_json, goal=goal)
+            except Exception as exc:  # pragma: no cover - defensive safeguard
+                LOGGER.debug("Structure planner request failed: %s", exc)
+                return {}
+
+            tree_json = getattr(response, "tree_json", "") if response else ""
+            if not tree_json:
+                LOGGER.debug("Structure planner returned empty tree response.")
+                raise LLMResponseError(
+                    "Structure planner returned an empty response; enable DORGY_USE_FALLBACKS=1 to "
+                    "continue with heuristic structure placement."
+                )
+
+            parsed = self._decode_tree_payload(tree_json)
+            if parsed is None:
+                snippet = tree_json if isinstance(tree_json, str) else repr(tree_json)
+                LOGGER.debug("Structure planner produced unparseable JSON: %s", snippet[:200])
+                raise LLMResponseError(
+                    "Structure planner produced an invalid JSON payload. "
+                    f"Partial response: {snippet[:160]!r}"
+                )
+
+            files = parsed.get("files")
+            if not isinstance(files, list):
+                LOGGER.debug("Structure planner response missing 'files' array.")
+                raise LLMResponseError(
+                    "Structure planner response is missing the required 'files' array."
+                )
+
+            mapping = self._build_mapping(files, descriptor_list, source_root)
+
+            if descriptor_list and not mapping:
+                if attempts >= 2:
+                    LOGGER.debug(
+                        "Structure planner produced no destinations for %d descriptor(s).",
+                        len(descriptor_list),
+                    )
+                    raise LLMResponseError(
+                        "Structure planner did not produce destinations for any files. "
+                        "Verify the configured LLM settings or set DORGY_USE_FALLBACKS=1 "
+                        "to use heuristics."
+                    )
+            missing_sources, shallow_sources = self._detect_structure_issues(
+                mapping,
+                descriptor_list,
+            )
+            if not missing_sources and not shallow_sources:
+                break
+
+            reminder_prompt = self._build_violation_prompt(
+                source_root,
+                missing_sources,
+                shallow_sources,
+            )
 
         if descriptor_list and not mapping:
             LOGGER.debug(
@@ -236,6 +274,17 @@ class StructurePlanner:
                 "Structure planner did not produce destinations for any files. "
                 "Verify the configured LLM settings or set DORGY_USE_FALLBACKS=1 to use heuristics."
             )
+
+        if missing_sources or shallow_sources:
+            mapping, adjustments = self._normalize_mapping(
+                mapping,
+                descriptor_list,
+                missing_sources,
+                shallow_sources,
+                source_root,
+            )
+            for note in adjustments:
+                LOGGER.warning(note)
 
         LOGGER.debug("Structure planner produced destinations for %d file(s).", len(mapping))
         return mapping
@@ -254,6 +303,210 @@ class StructurePlanner:
             if str(descriptor_relative).strip() == relative.strip():
                 return descriptor.path
         return None
+
+    @staticmethod
+    def _build_descriptor_summary(
+        descriptors: Iterable[FileDescriptor],
+        decisions: Iterable[ClassificationDecision | None],
+        root: Path,
+    ) -> str:
+        descriptor_list = list(descriptors)
+        decision_list = list(decisions)
+        total = len(descriptor_list)
+        if total == 0:
+            return ""
+
+        categories: Counter[str] = Counter()
+        mime_groups: Counter[str] = Counter()
+        parent_hints: Counter[str] = Counter()
+        duplicate_stems: Counter[str] = Counter()
+
+        for index, descriptor in enumerate(descriptor_list):
+            decision = decision_list[index] if index < len(decision_list) else None
+            if decision and decision.primary_category:
+                categories[str(decision.primary_category)] += 1
+
+            mime_type = descriptor.mime_type or "unknown/unknown"
+            mime_group = mime_type.split("/", 1)[0].lower()
+            mime_groups[mime_group] += 1
+
+            try:
+                relative = descriptor.path.relative_to(root)
+            except ValueError:
+                relative = descriptor.path
+            relative_path = Path(relative)
+            parent = relative_path.parent
+            if parent and str(parent) not in {"", "."}:
+                parent_hints[parent.as_posix()] += 1
+            duplicate_stems[relative_path.stem.lower()] += 1
+
+        lines = [f"Total files: {total}"]
+
+        if categories:
+            formatted = StructurePlanner._format_counter(categories)
+            if formatted:
+                lines.append(f"Primary categories: {formatted}")
+        elif mime_groups:
+            formatted = StructurePlanner._format_counter(mime_groups)
+            if formatted:
+                lines.append(f"MIME families: {formatted}")
+
+        if parent_hints:
+            formatted = StructurePlanner._format_counter(parent_hints)
+            if formatted:
+                lines.append(f"Existing folders to reuse: {formatted}")
+
+        duplicates = [stem for stem, count in duplicate_stems.items() if count > 1]
+        if duplicates:
+            preview = ", ".join(sorted(duplicates)[:5])
+            lines.append(f"Duplicate file stems detected: {preview}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_counter(counter: Counter[str], *, limit: int = 4) -> str:
+        return ", ".join(f"{name} ({count})" for name, count in counter.most_common(limit))
+
+    @staticmethod
+    def _build_mapping(
+        entries: Iterable[dict[str, object]],
+        descriptors: List[FileDescriptor],
+        root: Path,
+    ) -> Dict[Path, Path]:
+        mapping: Dict[Path, Path] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            source = entry.get("source")
+            destination = entry.get("destination")
+            if not isinstance(source, str) or not isinstance(destination, str):
+                continue
+            source_path = StructurePlanner._match_descriptor(source, descriptors, root)
+            if source_path is None:
+                continue
+            destination_path = Path(destination.strip().lstrip("/\\"))
+            if destination_path.parts:
+                mapping[source_path] = destination_path
+        return mapping
+
+    @staticmethod
+    def _detect_structure_issues(
+        mapping: Dict[Path, Path],
+        descriptors: List[FileDescriptor],
+    ) -> Tuple[List[Path], List[Tuple[Path, Path]]]:
+        missing = [descriptor.path for descriptor in descriptors if descriptor.path not in mapping]
+        shallow: List[Tuple[Path, Path]] = []
+        for source, destination in mapping.items():
+            if len(destination.parts) < 2:
+                shallow.append((source, destination))
+        return missing, shallow
+
+    @staticmethod
+    def _build_violation_prompt(
+        root: Path,
+        missing: Iterable[Path],
+        shallow: Iterable[Tuple[Path, Path]],
+    ) -> str:
+        lines: list[str] = []
+        missing_list = [StructurePlanner._relative_path(path, root) for path in missing]
+        if missing_list:
+            lines.append(
+                "Assign destinations for every file. These entries were missing: "
+                + ", ".join(sorted(missing_list))
+            )
+
+        shallow_list = [
+            f"{StructurePlanner._relative_path(src, root)} -> {dest.as_posix()}"
+            for src, dest in shallow
+        ]
+        if shallow_list:
+            lines.append(
+                "Ensure at least two path segments per destination. Update these mappings: "
+                + ", ".join(sorted(shallow_list))
+            )
+
+        lines.append(
+            "Return JSON matching the required schema with every file represented exactly once."
+        )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _normalize_mapping(
+        mapping: Dict[Path, Path],
+        descriptors: List[FileDescriptor],
+        missing: Iterable[Path],
+        shallow: Iterable[Tuple[Path, Path]],
+        root: Path,
+    ) -> Tuple[Dict[Path, Path], List[str]]:
+        descriptor_map = {descriptor.path: descriptor for descriptor in descriptors}
+        normalized = dict(mapping)
+        notes: List[str] = []
+
+        for missing_path in missing:
+            descriptor = descriptor_map.get(missing_path)
+            if descriptor is None:
+                continue
+            fallback = StructurePlanner._fallback_destination(descriptor)
+            normalized[missing_path] = fallback
+            notes.append(
+                "Assigned fallback destination %s for %s"
+                % (fallback.as_posix(), StructurePlanner._relative_path(missing_path, root))
+            )
+
+        for source, destination in shallow:
+            descriptor = descriptor_map.get(source)
+            if descriptor is None:
+                continue
+            fixed = StructurePlanner._ensure_nested_destination(destination, descriptor)
+            if fixed != destination:
+                normalized[source] = fixed
+                notes.append(
+                    "Nested destination enforced for %s -> %s"
+                    % (StructurePlanner._relative_path(source, root), fixed.as_posix())
+                )
+
+        return normalized, notes
+
+    @staticmethod
+    def _fallback_destination(descriptor: FileDescriptor) -> Path:
+        return _FALLBACK_PARENT / descriptor.path.name
+
+    @staticmethod
+    def _ensure_nested_destination(destination: Path, descriptor: FileDescriptor) -> Path:
+        clean = Path(str(destination).strip().lstrip("/\\"))
+        if len(clean.parts) >= 2:
+            return clean
+
+        filename = descriptor.path.name
+        if not clean.parts:
+            return _FALLBACK_PARENT / filename
+
+        target = clean.parts[0]
+        candidate = Path(target)
+        if candidate.suffix or candidate.name == filename:
+            return _FALLBACK_PARENT / candidate.name
+
+        return candidate / filename
+
+    @staticmethod
+    def _relative_path(path: Path, root: Path) -> str:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return path.name
+
+    @staticmethod
+    def _merge_prompts(base: Optional[str], supplement: Optional[str]) -> Optional[str]:
+        parts = []
+        for value in (base, supplement):
+            if value is None:
+                continue
+            stripped = value.strip()
+            if stripped:
+                parts.append(stripped)
+        if not parts:
+            return None
+        return "\n\n".join(parts)
 
     @staticmethod
     def _decode_tree_payload(tree_json: object) -> Optional[dict]:
@@ -353,19 +606,25 @@ class StructurePlanner:
         return value[start : end + 1]
 
     @staticmethod
-    def _compose_goal_prompt(prompt: Optional[str]) -> str:
-        """Return the LLM goal instructions including any user guidance.
+    def _compose_goal_prompt(summary: str, prompt: Optional[str]) -> str:
+        """Return the LLM goal instructions including context and user guidance.
 
         Args:
+            summary: Auto-generated collection context derived from descriptors.
             prompt: Optional user-provided instructions to append.
 
         Returns:
             Full prompt text supplied to the structure planner model.
         """
 
-        if prompt is None:
-            return _BASE_INSTRUCTIONS
-        stripped = prompt.strip()
-        if not stripped:
-            return _BASE_INSTRUCTIONS
-        return f"{_BASE_INSTRUCTIONS}\n\nUser guidance:\n{stripped}"
+        sections = [_BASE_INSTRUCTIONS]
+        summary_block = (summary or "").strip()
+        if summary_block:
+            sections.append(f"Collection context:\n{summary_block}")
+
+        if prompt is not None:
+            stripped = prompt.strip()
+            if stripped:
+                sections.append(f"User guidance:\n{stripped}")
+
+        return "\n\n".join(sections)

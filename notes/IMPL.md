@@ -14,6 +14,8 @@
 8. Phase 6 – CLI Surface: deliver watch, search, mv commands with Rich/TQDM feedback and consistent option parsing.
 9. Phase 7 – Search & Metadata APIs: use chromadb collections to power semantic and tag/date filters, maintain FileRecord index on each organization run, and update entries when mv executes (with validation of destination).
 10. Phase 8 – Testing & Tooling: configure uv pip compile lock, add pre-commit (formatting, lint, import sort, pytest), implement unit/integration tests for pipeline stages and CLI workflows (including dry-run/undo), and document automation expectations in AGENTS plus SPEC alignment updates.
+11. Phase 9 – Structure Planner Hardening: tighten LLM prompts/guards so every descriptor receives a multi-level destination (or explicit fallback) and surface coverage metrics to users/automation.
+12. Phase 10 – Eval Automation Suite: add repeatable eval fixtures/tasks so structure planning and related flows can be validated across target LLMs.
 
 ## Phase 4.5 – CLI Polish & UX Scope
 
@@ -291,3 +293,33 @@
 - `dorgy search` returns semantic results (with scores) alongside existing filter support and passes new integration tests.
 - Watch and organization flows update the ChromaDB index without manual intervention; index manifests remain in sync with `.dorgy/state.json`.
 - Documentation (README, SPEC Phase 7, AGENTS) covers index configuration, maintenance commands, and automation expectations.
+
+## Phase 9 – Structure Planner Hardening
+
+1. Baseline & Instrumentation
+   - Capture current structure planner outputs on representative corpora, summarizing shortcomings (single-segment destinations, unmapped files) in `notes/STATUS.md` and `SPEC.md` phase trackers for regression reference.
+   - Add coverage/depth logging so CLI summaries and telemetry can highlight how many files required fallback or normalization.
+
+2. Prompt & Context Rewrite
+   - Update `_BASE_INSTRUCTIONS` plus `_compose_goal_prompt()` to require one-to-one coverage, minimum two path segments per destination (unless routed to an explicit `misc/<filename>` bucket), and to auto-append descriptor/category summaries when invoking DSPy.
+   - Refresh docstrings, `docs/architecture.md`, and `src/dorgy/classification/AGENTS.md` to describe the stronger contract and how user prompts are appended.
+
+3. Response Enforcement & Normalization
+   - Extend `StructurePlanner.propose()` validation to detect missing descriptors or shallow paths, re-issuing a targeted re-prompt when violations occur before falling back to heuristics.
+   - Normalize any lingering single-segment destinations by injecting safe parent folders (e.g., `uncategorized/`) so downstream planners never leave files at collection root unintentionally.
+
+4. Telemetry & CLI Surfacing
+   - Emit human-readable warnings and structured JSON notes when the planner had to patch destinations or when chroma/search manifests need updating.
+   - Wire these metrics into CLI summary helpers and document expectations for automation consumers in AGENTS.md.
+
+
+## Phase 10 – Eval Automation Suite
+
+1. Scenario Fixtures
+   - Introduce deterministic corpora (e.g., `evals/structure/*.json`) capturing descriptors, categories, and expected invariants (coverage, depth, folder reuse) so outputs can be validated offline.
+
+2. Runner & Reporting
+   - Implement an Invoke/pytest-driven harness (`uv run invoke eval-structure --model ...`) that sweeps multiple LLMs/temperatures, emits JSON scorecards, and supports golden baselines for CI comparisons.
+
+3. Documentation & Gating
+   - Codify execution steps in SPEC/README, note coordination rules in AGENTS.md, and define success thresholds so release branches can gate on eval health before merging.

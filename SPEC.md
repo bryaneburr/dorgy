@@ -32,6 +32,8 @@ dorgy org . -r \
   --classify-prompt "Highlight tax documents" \
   --structure-prompt "Group files by tax year"
 
+# Structure planner prompts automatically include collection summaries (file counts, category tallies, folder hints, duplicate stems) and must return destinations for every descriptor with at least two path segments. Any gap is patched through deterministic fallbacks such as `misc/<filename>` so downstream operations remain consistent even when an LLM omits a mapping.
+
 # Supply classification instructions from a file
 dorgy org . --classify-prompt-file prompts/tax-guidelines.txt
 
