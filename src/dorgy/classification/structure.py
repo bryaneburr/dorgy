@@ -7,6 +7,7 @@ import logging
 import os
 import re
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -52,6 +53,26 @@ _BASE_INSTRUCTIONS = (
 
 _FALLBACK_PARENT = Path("misc")
 
+
+@dataclass
+class StructurePlannerMetrics:
+    """Lightweight telemetry describing the most recent planner run."""
+
+    attempts: int = 0
+    reminder_used: bool = False
+    normalized_missing: int = 0
+    normalized_shallow: int = 0
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "attempts": self.attempts,
+            "reminder_used": self.reminder_used,
+            "normalized_missing": self.normalized_missing,
+            "normalized_shallow": self.normalized_shallow,
+            "normalized_total": self.normalized_missing + self.normalized_shallow,
+        }
+
+
 _CODE_FENCE_PATTERN = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
@@ -84,6 +105,7 @@ class StructurePlanner:
         self._allow_reprompt = enable_reprompt
         self._enabled = False
         self._program: Optional[dspy.Module] = None  # type: ignore[attr-defined]
+        self._last_metrics = StructurePlannerMetrics()
 
         if use_fallback:
             LOGGER.info("Structure planner fallback enabled by DORGY_USE_FALLBACKS=1.")
@@ -156,11 +178,13 @@ class StructurePlanner:
         """
 
         if self._use_fallback or not self._enabled or self._program is None:
+            self._last_metrics = StructurePlannerMetrics()
             return {}
 
         descriptor_list = list(descriptors)
         decision_list = list(decisions)
         if not descriptor_list:
+            self._last_metrics = StructurePlannerMetrics()
             return {}
 
         payload: list[dict[str, object]] = []
@@ -207,6 +231,7 @@ class StructurePlanner:
 
         attempts = 0
         max_attempts = 2 if self._allow_reprompt else 1
+        reminder_used = False
         reminder_prompt: Optional[str] = None
         mapping: Dict[Path, Path] = {}
         missing_sources: List[Path] = []
@@ -271,6 +296,7 @@ class StructurePlanner:
                 missing_sources,
                 shallow_sources,
             )
+            reminder_used = True
 
         if descriptor_list and not mapping:
             LOGGER.debug(
@@ -282,7 +308,11 @@ class StructurePlanner:
                 "Verify the configured LLM settings or set DORGY_USE_FALLBACKS=1 to use heuristics."
             )
 
+        normalized_missing = 0
+        normalized_shallow = 0
         if missing_sources or shallow_sources:
+            normalized_missing = len(missing_sources)
+            normalized_shallow = len(shallow_sources)
             mapping, adjustments = self._normalize_mapping(
                 mapping,
                 descriptor_list,
@@ -293,8 +323,18 @@ class StructurePlanner:
             for note in adjustments:
                 LOGGER.warning(note)
 
+        self._last_metrics = StructurePlannerMetrics(
+            attempts=attempts,
+            reminder_used=reminder_used,
+            normalized_missing=normalized_missing,
+            normalized_shallow=normalized_shallow,
+        )
         LOGGER.debug("Structure planner produced destinations for %d file(s).", len(mapping))
         return mapping
+
+    @property
+    def last_metrics(self) -> StructurePlannerMetrics:
+        return getattr(self, "_last_metrics", StructurePlannerMetrics())
 
     @staticmethod
     def _match_descriptor(

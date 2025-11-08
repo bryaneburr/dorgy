@@ -402,6 +402,7 @@ def org(
                     f"Planning structure ({len(descriptor_list)} files)",
                     total=None,
                 )
+            structure_metrics = None
             if descriptor_list:
                 try:
                     structure_planner = StructurePlannerCls(
@@ -416,6 +417,7 @@ def org(
                     )
                     if structure_task is not None:
                         structure_task.complete("Structure plan ready")
+                    structure_metrics = getattr(structure_planner, "last_metrics", None)
                 except LLMUnavailableError:
                     if structure_task is not None:
                         structure_task.complete("Structure plan skipped")
@@ -509,6 +511,14 @@ def org(
 
         llm_metadata = _collect_llm_metadata(config.llm)
         counts = compute_org_counts(result, classification_batch, plan)
+        structure_metrics_dict: dict[str, object] | None = None
+        if structure_metrics is not None:
+            structure_metrics_dict = structure_metrics.as_dict()
+            counts["structure_attempts"] = structure_metrics.attempts
+            counts["structure_reprompted"] = int(structure_metrics.reminder_used)
+            counts["structure_autofixes"] = (
+                structure_metrics.normalized_missing + structure_metrics.normalized_shallow
+            )
         json_payload: dict[str, Any] = {
             "context": {
                 "source_root": source_root.as_posix(),
@@ -525,6 +535,8 @@ def org(
             "files": file_entries,
             "notes": list(plan.notes),
         }
+        if structure_metrics_dict is not None:
+            json_payload["structure_metrics"] = structure_metrics_dict
         json_payload["context"]["llm"] = llm_metadata
         json_payload["errors"] = collect_error_payload(result, classification_batch)
 
@@ -605,6 +617,31 @@ def org(
                 _emit_message(
                     f"[yellow]{len(result.quarantined)} files would be quarantined during "
                     "execution.[/yellow]",
+                    mode="warning",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+
+            if (
+                structure_metrics is not None
+                and structure_metrics.reminder_used
+                and not summary_only
+            ):
+                _emit_message(
+                    "[cyan]Structure planner re-prompted once to tighten coverage.[/cyan]",
+                    mode="detail",
+                    quiet=quiet_enabled,
+                    summary_only=summary_only,
+                )
+            auto_fix_total = 0
+            if structure_metrics is not None:
+                auto_fix_total = (
+                    structure_metrics.normalized_missing + structure_metrics.normalized_shallow
+                )
+            if auto_fix_total and not summary_only:
+                _emit_message(
+                    f"[yellow]Structure planner auto-adjusted {auto_fix_total} path(s) after "
+                    "validation.[/yellow]",
                     mode="warning",
                     quiet=quiet_enabled,
                     summary_only=summary_only,
