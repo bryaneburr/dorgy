@@ -5,9 +5,19 @@
 
 # Dorgy
 
-<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_cropped.png" alt="dorgy logo" height="150" style="height: 150px">
+<img src="https://github.com/bryaneburr/dorgy/raw/main/images/dorgy_logo_cropped.png" alt="dorgy logo" height="150" style="height: 150px" />
 
-AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries — all powered by portable per‑collection state.
+
+AI‑assisted CLI to keep growing collections of files tidy. Organize folders with safe renames/moves and undo, watch directories for changes, and search collections with substring or semantic queries - all powered by portable per‑collection state.
+
+
+Read the documentation: [https://bryaneburr.github.io/dorgy/](https://bryaneburr.github.io/dorgy/)
+
+### Powered by:
+- [DSPy](https://github.com/stanfordnlp/dspy) - Structured LLM queries and responses
+- [Docling](https://github.com/docling-project/docling) - Document processing
+- [ChromaDB](https://github.com/chroma-core/chroma) - Document search
+- [Durango](https://github.com/bryaneburr/durango-config) - CLI Configuration management
 
 ## What It Does
 
@@ -84,7 +94,7 @@ dorgy undo ./documents --dry-run
 dorgy status ./documents --json
 ```
 
-See the docs for guides on Organize, Watch, Search, Move/Undo, and configuration details.
+See the [docs](https://bryaneburr.github.io/dorgy/) for guides on Organize, Watch, Search, Move/Undo, and configuration details.
 
 ### Configuring LLM access
 
@@ -105,19 +115,24 @@ export DORGY__LLM__API_BASE_URL="https://api.openai.com/v1"
 
 Then run CLI commands as usual (`dorgy org`, `dorgy watch`, etc.).
 
-### LLM Recommendations
+## Notes on LLM Performance
 
 We've tested `dorgy` with a number of LLMs and providers, and we've found the following to perform well:
+- Gemini 2.5 (Best)
+- Claude Sonnet 4.5
 - GPT-5
-- Gemini 2.5
-- If you use [OpenRouter](https://openrouter.ai), the `openrouter/auto` model is an interesting choice.
+- If you use [OpenRouter](https://openrouter.ai), the `openrouter/auto` model can give interesting results.
 
-## Documentation
 
-- Published site: https://bryaneburr.github.io/dorgy/
-- Source: `docs/` (MkDocs + shadcn)
-- Start with Getting Started → Quickstart and Configuration.
-- Configuration management is powered by [Durango](https://github.com/bryaneburr/durango-config); see the Configuration guide for precedence details.
+For many use cases, `dorgy` already performs well. YMMV depending on how much text content is in your files, the amount of context sent to the LLM, how good the LLM you're using is at this task, etc. That said, we are always looking to improve `dorgy`'s performance and accuracy across a wide range of scenarios.
+
+## What's Next?
+
+`dorgy`'s development is ongoing. Here are some areas I'd like to explore next:
+- Keep on adding file types and specialized handlers for: audio files, OCR'ing PDFs and other images containing text, and tabular data (CSV, Excel, etc.). Let me know if there's any other interesting/special file types you'd like `dorgy` to handle.
+- Improve search beyond simple vector/semantic similarity and exact match, including for specialized file types.
+- Improve the confidence scoring and "needs-review" system.
+- Use `DSPy`'s [evalution](https://dspy.ai/learn/evaluation/overview/) and [optimization](https://dspy.ai/learn/optimization/overview/) framework to make `dorgy` perform even better. If you would like to contribute the JSON output of your "good" and "bad" runs, reach out on our [discussions](https://github.com/bryaneburr/dorgy/discussions) page! Let's experiment!
 
 
 ## Contributing
