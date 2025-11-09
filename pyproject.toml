@@ -9,7 +9,7 @@ description = "AI-assisted CLI for organizing files."
 readme = "README.md"
 authors = [{ name = "Bryan E. Burr" }]
 license = { file = "LICENSE" }
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11"
 keywords = ["cli", "automation", "productivity", "document organization", "ai"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -23,6 +23,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
 urls = { Homepage = "https://github.com/bryaneburr/dorgy", "Bug Tracker" = "https://github.com/bryaneburr/dorgy/issues", Documentation = "https://bryaneburr.github.io/dorgy/" }

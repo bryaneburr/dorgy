@@ -57,6 +57,8 @@ Exact destinations depend on your config and prompts; all moves are reversible v
 
 ## Installation
 
+Requires Python 3.11 or newer on macOS, Linux, or Windows.
+
 ### PyPI (recommended)
 
 ```bash
