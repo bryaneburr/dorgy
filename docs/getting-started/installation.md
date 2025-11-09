@@ -1,6 +1,6 @@
 # Installation
 
-Dorgy is distributed on PyPI and supports Python 3.11–3.12.
+Dorgy is distributed on PyPI and supports Python 3.11 and newer.
 
 ## PyPI (recommended)
 
@@ -27,4 +27,3 @@ uv pip install -e .
 ```
 
 See also: README Installation notes and the release workflow in docs/development/release.md.
-

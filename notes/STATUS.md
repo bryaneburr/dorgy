@@ -1,5 +1,11 @@
 # Status Log
 
+## 2025-11-08
+- Patched `tasks.py` to call task functions directly (Invoke 2.x no longer exposes `ctx.invoke`) and re-ran `uv run invoke ci` successfully so contributors can mirror the GH workflow locally.
+- Dropped the `<3.13` ceiling from our packaging metadata, regenerated `uv.lock`, and documented the new Python >=3.11 support in README, docs, and SPEC.
+- Expanded CI to fan out over Python 3.11–3.13 and added the missing Trove classifier so PyPI and badges reflect true compatibility.
+- Next actions: merge the Python-version updates once multi-interpreter CI stays green and keep an eye out for any Invoke regressions in downstream automation.
+
 ## 2025-11-06
 - Installed the new `durango` dependency with `uv add` and replaced the bespoke configuration layer with direct Durango usage (`ensure_config`, `load_config`, `save_config`) while keeping CLI/env/file precedence intact.
 - Updated `dorgy.config.models` to inherit from `DurangoSettings`, retained YAML parsing for `DORGY__*` environment variables, and introduced `normalize_override_mapping` so CLI overrides (dotted keys) compose cleanly with nested mappings.

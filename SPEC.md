@@ -14,6 +14,9 @@ An automated file organization system that leverages LLMs to intelligently categ
 - Batch organization of existing file collections
 - Smart cleanup and deduplication
 
+### Runtime Requirements
+- Python 3.11 or newer (CI currently exercises 3.11, 3.12, and 3.13).
+
 ## Usage
 
 ### Examples

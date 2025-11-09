@@ -429,9 +429,9 @@ def ci(ctx: Context) -> None:
     Args:
         ctx: Invoke execution context.
     """
-    ctx.invoke(lint, check_format=True)
-    ctx.invoke(mypy)
-    ctx.invoke(tests)
+    lint(ctx, check_format=True)
+    mypy(ctx)
+    tests(ctx)
 
 
 namespace = Collection(
