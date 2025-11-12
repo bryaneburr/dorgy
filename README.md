@@ -90,11 +90,18 @@ dorgy org ./documents
 
 # Monitor a directory and emit JSON batches
 dorgy watch ./inbox --json --once
+dorgy watch ./inbox            # keep watching after the initial sweep
 
 # Undo the latest plan
 dorgy undo ./documents --dry-run
 dorgy status ./documents --json
 ```
+
+### Watch batching & safety
+
+- File events are debounced into batches so bursts of changes process together, and the CLI reports each completed batch.
+- Before ingesting anything, every batch re-checks that files still exist, so deletes or moves that happen mid-queue become safe no-ops.
+- Moves and deletes show up in CLI/JSON output as `removals` or `suppressed_deletions`, with destructive changes gated by `processing.watch.allow_deletions` / `--allow-deletions`.
 
 See the [docs](https://bryaneburr.github.io/dorgy/) for guides on Organize, Watch, Search, Move/Undo, and configuration details.
 
