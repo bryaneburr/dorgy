@@ -6,8 +6,8 @@ import logging
 
 from rich.console import Console
 
-console = Console()
-"""Rich console singleton used by CLI commands for output."""
+console = Console(color_system=None, no_color=True)
+"""Rich console singleton used by CLI commands for output without color."""
 
 LOGGER = logging.getLogger("dorgy.cli")
 """Package-level logger for CLI diagnostics."""
