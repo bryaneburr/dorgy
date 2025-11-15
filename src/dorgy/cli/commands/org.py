@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -269,7 +270,14 @@ def org(
             ) -> None:
                 label = INGESTION_STAGE_LABELS.get(stage, stage.replace("_", " ").title())
                 completed = ingestion_state["completed"]
-                path_name = stage_path.name
+                path_name = textwrap.shorten(
+                    stage_path.name,
+                    width=60,
+                    placeholder="...",
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                    drop_whitespace=False,
+                )
                 size_value = None
                 if info is not None and "size_bytes" in info:
                     try:
@@ -345,7 +353,14 @@ def org(
                 if overall_task is None:
                     return
 
-                name = descriptor.path.name
+                name = textwrap.shorten(
+                    descriptor.path.name,
+                    width=60,
+                    placeholder="...",
+                    break_long_words=False,
+                    break_on_hyphens=False,
+                    drop_whitespace=False,
+                )
                 size_text = _format_size(_descriptor_size(descriptor))
                 display = f"{name} ({size_text})" if size_text != "?" else name
 
