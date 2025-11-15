@@ -14,6 +14,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from dorgy.cli.context import console
+
 
 @dataclass(slots=True)
 class _ProgressTask:
@@ -97,6 +99,7 @@ class _ProgressScope(AbstractContextManager["_ProgressScope"]):
             TimeElapsedColumn(),
             transient=True,
             expand=True,
+            console=console,
         )
         self._progress.__enter__()
         return self
