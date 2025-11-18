@@ -4,6 +4,7 @@
 - Keep heavy dependencies lazy: commands should rely on `_load_dependency` from `dorgy.cli.lazy` so startup remains fast and tests can monkeypatch imported classes.
 - Reuse helpers under `helpers/` for logging/progress/state/search logic (`helpers/messages.py`, `helpers/progress.py`, `helpers/state.py`, etc.) to preserve consistent quiet/summary/JSON behaviour across commands.
 - CLI output must remain monochrome: `context.console` disables Rich color support globally, so avoid embedding markup color tags or override only when explicitly re-enabling color for JSON-free flows.
+- `commands/version.py` reports installed package metadata with a pyproject fallback; keep the JSON payload shape (`version`, `python_version`, `source`, `location`, `notes`) stable so automation can probe environments without parsing text output.
 - Any CLI feature that touches automation-facing payloads must update `helpers/messages` so JSON and Rich outputs remain aligned; extend or adjust related tests under `tests/test_cli_*.py`.
 - Update `ARCH.md`, `SPEC.md`, and `notes/STATUS.md` whenever CLI surface area or coordination expectations change; `helpers` docstrings should stay Google-style to guide contributors.
 - Before merging CLI changes, run `uv run pre-commit run --all-files` and ensure new options are reflected in `README.md` examples plus `SPEC.md` configuration tables.

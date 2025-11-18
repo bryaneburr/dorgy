@@ -83,6 +83,8 @@ uv pip install -e .
 ```bash
 # Inspect available commands
 dorgy --help
+dorgy version
+dorgy version --json
 
 # Organize a directory in place (dry run first)
 dorgy org ./documents --dry-run

@@ -5,7 +5,7 @@
 ## System Overview
 
 - Runtime is anchored by `main.py` and `src/dorgy/__main__.py`, which forward to `dorgy.cli.main`. The CLI now lives in the `src/dorgy/cli/` package: `app.py` wires the Click group, `commands/` houses per-command builders, `helpers/` centralize progress/output/state utilities, and `lazy.py` keeps heavy dependencies lazily loaded so startup remains fast.
-- Commands funnel through shared helpers that normalize quiet/summary/JSON modes, yielding identical human and machine-readable outputs across organization, watch, search, move, status, undo, and config operations.
+- Commands funnel through shared helpers that normalize quiet/summary/JSON modes, yielding identical human and machine-readable outputs across organization, watch, search, move, status, undo, config, and version operations.
 - Core workflows revolve around a pipeline that discovers candidate files, extracts metadata, classifies items with DSPy-backed or heuristic models, plans renames/moves, executes them safely, and records state for auditing and undo.
 - Persistent metadata and caches live in `.dorgy/` under each collection root, enabling reversible operations and incremental processing.
 
@@ -13,7 +13,7 @@
 
 ### CLI Entry & Command Dispatch
 
-`dorgy.cli.app` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, and the nested `config` group. Command implementations live in `dorgy.cli.commands.*`, while `_LAZY_ATTRS` plus `__getattr__`/`_load_dependency` in `dorgy.cli.lazy` defer heavyweight imports (classification, ingestion, watch, organization, state) until a command needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) flows through `dorgy.cli.helpers.*` so new commands automatically inherit consistent UX.
+`dorgy.cli.app` exposes a Click group (`cli()`) with subcommands such as `org`, `watch`, `search`, `mv`, `undo`, `status`, `version`, and the nested `config` group. Command implementations live in `dorgy.cli.commands.*`, while `_LAZY_ATTRS` plus `__getattr__`/`_load_dependency` in `dorgy.cli.lazy` defer heavyweight imports (classification, ingestion, watch, organization, state) until a command needs them. UI behaviour (progress bars, summary lines, shared errors, JSON payloads) flows through `dorgy.cli.helpers.*` so new commands automatically inherit consistent UX.
 
 ### Organization & Watch Pipeline
 
@@ -26,7 +26,7 @@
 
 ### State-Oriented Commands
 
-`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. `search` requires an active Chromadb index; the CLI errors if a collection has not been initialized via `dorgy org --with-search` or `dorgy search --init-store`. When enabled, search layers Chromadb substring lookups (`where_document{"$contains": ...}`) and semantic queries (`collection.query`) on top of tag/category/date filters, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads.
+`status`, `search`, `mv`, and `undo` operate on stored `CollectionState`. `search` requires an active Chromadb index; the CLI errors if a collection has not been initialized via `dorgy org --with-search` or `dorgy search --init-store`. When enabled, search layers Chromadb substring lookups (`where_document{"$contains": ...}`) and semantic queries (`collection.query`) on top of tag/category/date filters, `mv` rewrites tracked paths while preserving history, and `undo` hands the last `OperationPlan` back to `OperationExecutor.rollback`. All commands surface JSON alongside human-readable output and reuse shared error payloads. The `version` command reports the installed Dorgy and Python versions with a pyproject fallback so automation can introspect environments even when distribution metadata is missing.
 
 ## Module Responsibilities
 
