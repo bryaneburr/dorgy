@@ -1,5 +1,10 @@
 # Status Log
 
+## 2025-11-17
+- Added a `dorgy version` command that reuses quiet/summary/JSON helpers, surfaces Python and install metadata, and falls back to `pyproject.toml` when package metadata is missing.
+- Registered the command in the CLI app, documented the automation payload shape in `src/dorgy/cli/AGENTS.md`, and refreshed README/SPEC/ARCH to list the new surface; tests cover both text and JSON flows.
+- Next actions: run `uv run pre-commit run --all-files`, spot-check `dorgy --help`/`dorgy version --json` in a packaged environment, and monitor for any config-default regressions now that the command skips creating config files.
+
 ## 2025-11-08
 - Patched `tasks.py` to call task functions directly (Invoke 2.x no longer exposes `ctx.invoke`) and re-ran `uv run invoke ci` successfully so contributors can mirror the GH workflow locally.
 - Dropped the `<3.13` ceiling from our packaging metadata, regenerated `uv.lock`, and documented the new Python >=3.11 support in README, docs, and SPEC.

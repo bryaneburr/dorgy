@@ -70,6 +70,10 @@ dorgy config edit # edit config
 dorgy config view # view config
 dorgy config set some_key --value some_value # set config value
 
+# Inspect the installed version
+dorgy version
+dorgy version --json
+
 # Search within organized directory
 dorgy search some/folder/ --search "Text for semantic search" --tags "Finance, Tax, Invoice" --before "Aug 31st 2025"
 

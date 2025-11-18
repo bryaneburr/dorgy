@@ -15,6 +15,7 @@ from .commands.org import register_org_command
 from .commands.search import register_search_command
 from .commands.status import register_status_command
 from .commands.undo import register_undo_command
+from .commands.version import register_version_command
 from .commands.watch import register_watch_command
 
 
@@ -32,6 +33,7 @@ register_search_command(cli)
 register_mv_command(cli)
 register_status_command(cli)
 register_undo_command(cli)
+register_version_command(cli)
 
 
 def main() -> None:
